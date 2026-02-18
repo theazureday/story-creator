@@ -4,75 +4,151 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 export const maxDuration = 60;
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+const STABILITY_API_KEY = process.env.STABILITY_API_KEY || '';
+const STABILITY_BASE = 'https://api.stability.ai/v2beta/stable-image/generate';
 
 // ============================================================
-// Image Generation Helpers
+// Stability AI Image Generation Helpers
 // ============================================================
 
-const IMAGE_MODELS = [
-  'gemini-3-pro-image-preview',
-  'gemini-2.5-flash-image',
-  'gemini-2.0-flash-exp-image-generation',
+/** Models to try in order — Ultra is highest quality, then SD3.5 Large, then Core (fastest/cheapest) */
+const STABILITY_ENDPOINTS = [
+  `${STABILITY_BASE}/ultra`,
+  `${STABILITY_BASE}/sd3`,
+  `${STABILITY_BASE}/core`,
 ];
 
-const TEXT_MODEL = 'gemini-2.0-flash';
-
-interface GeminiImageData {
-  inlineData: {
-    data: string;
-    mimeType: string;
-  };
-}
-
-async function generateImage(prompt: string): Promise<{ imageUrl: string } | null> {
-  for (const modelName of IMAGE_MODELS) {
+/**
+ * Text-to-image generation via Stability AI.
+ * Tries Ultra → SD3.5 → Core until one succeeds.
+ */
+async function generateImage(
+  prompt: string,
+  negativePrompt: string,
+  aspectRatio: string = '2:3',
+): Promise<{ imageUrl: string } | null> {
+  for (const endpoint of STABILITY_ENDPOINTS) {
     try {
-      const model = genAI.getGenerativeModel({
-        model: modelName,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } as any,
+      const form = new FormData();
+      form.append('prompt', prompt);
+      form.append('negative_prompt', negativePrompt);
+      form.append('aspect_ratio', aspectRatio);
+      form.append('output_format', 'png');
+
+      // SD3 endpoint accepts a model param
+      if (endpoint.includes('/sd3')) {
+        form.append('model', 'sd3.5-large');
+      }
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${STABILITY_API_KEY}`,
+          Accept: 'application/json',
+        },
+        body: form,
       });
-      const result = await model.generateContent(prompt);
-      const candidates = result.response.candidates;
-      if (candidates && candidates[0]?.content?.parts) {
-        for (const part of candidates[0].content.parts) {
-          if ('inlineData' in part && part.inlineData) {
-            return { imageUrl: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` };
-          }
-        }
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        console.error(`Stability ${endpoint} failed (${res.status}):`, errText);
+        continue;
+      }
+
+      const data = await res.json();
+      if (data.image) {
+        return { imageUrl: `data:image/png;base64,${data.image}` };
       }
     } catch (err) {
-      console.error(`Model ${modelName} failed:`, err instanceof Error ? err.message : err);
+      console.error(`Stability ${endpoint} error:`, err instanceof Error ? err.message : err);
       continue;
     }
   }
   return null;
 }
 
-async function generateImageFromRef(prompt: string, imageData: GeminiImageData): Promise<{ imageUrl: string } | null> {
-  for (const modelName of IMAGE_MODELS) {
+/**
+ * Image-to-image generation via Stability AI SD3.
+ * Takes a base image and generates a variant with the given prompt.
+ * Strength controls how much the output deviates from the input (0 = identical, 1 = completely new).
+ */
+async function generateImageToImage(
+  prompt: string,
+  negativePrompt: string,
+  imageBase64: string,
+  imageMimeType: string,
+  strength: number = 0.65,
+): Promise<{ imageUrl: string } | null> {
+  // Convert base64 to Blob for FormData
+  const imageBytes = Buffer.from(imageBase64, 'base64');
+  const ext = imageMimeType.includes('png') ? 'png' : 'jpg';
+  const imageBlob = new Blob([imageBytes], { type: imageMimeType });
+
+  // Try SD3 endpoint for img2img (it supports mode: image-to-image)
+  const endpoints = [
+    `${STABILITY_BASE}/sd3`,
+    `${STABILITY_BASE}/ultra`,
+  ];
+
+  for (const endpoint of endpoints) {
     try {
-      const model = genAI.getGenerativeModel({
-        model: modelName,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } as any,
+      const form = new FormData();
+      form.append('prompt', prompt);
+      form.append('negative_prompt', negativePrompt);
+      form.append('mode', 'image-to-image');
+      form.append('image', imageBlob, `input.${ext}`);
+      form.append('strength', strength.toString());
+      form.append('output_format', 'png');
+
+      if (endpoint.includes('/sd3')) {
+        form.append('model', 'sd3.5-large');
+      }
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${STABILITY_API_KEY}`,
+          Accept: 'application/json',
+        },
+        body: form,
       });
-      const result = await model.generateContent([prompt, imageData]);
-      const candidates = result.response.candidates;
-      if (candidates && candidates[0]?.content?.parts) {
-        for (const part of candidates[0].content.parts) {
-          if ('inlineData' in part && part.inlineData) {
-            return { imageUrl: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` };
-          }
-        }
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        console.error(`Stability img2img ${endpoint} failed (${res.status}):`, errText);
+        continue;
+      }
+
+      const data = await res.json();
+      if (data.image) {
+        return { imageUrl: `data:image/png;base64,${data.image}` };
       }
     } catch (err) {
-      console.error(`Model ${modelName} failed:`, err instanceof Error ? err.message : err);
+      console.error(`Stability img2img ${endpoint} error:`, err instanceof Error ? err.message : err);
       continue;
     }
   }
   return null;
 }
+
+// ============================================================
+// Anime-tuned prompts & negative prompts
+// ============================================================
+
+/** Shared negative prompt optimized for clean anime character sprites */
+const ANIME_NEGATIVE_PROMPT = [
+  'photorealistic', 'photo', '3D render', 'CGI', 'western cartoon',
+  'deformed', 'ugly', 'blurry', 'low quality', 'bad anatomy',
+  'extra limbs', 'extra fingers', 'mutated hands', 'poorly drawn face',
+  'poorly drawn hands', 'missing fingers', 'fused fingers',
+  'text', 'watermark', 'signature', 'logo', 'username',
+  'cropped', 'out of frame', 'worst quality', 'low resolution',
+  'jpeg artifacts', 'duplicate', 'morbid', 'mutilated',
+  'disfigured', 'gross proportions', 'malformed limbs',
+  'multiple views', 'multiple angles', 'split screen',
+  'background elements', 'scenery', 'landscape', 'furniture',
+  'busy background', 'patterned background',
+].join(', ');
 
 function getExpressivenessDescription(level: number): string {
   if (level <= 15) return 'VERY SUBTLE expression — barely noticeable change, stoic and reserved like Frieren or Violet Evergarden. The emotion should be conveyed through very slight micro-expressions only.';
@@ -80,6 +156,70 @@ function getExpressivenessDescription(level: number): string {
   if (level <= 55) return 'MODERATE expression — natural and balanced, a clear but not exaggerated expression. The emotion is easily readable but grounded.';
   if (level <= 75) return 'EXPRESSIVE — clearly animated facial expression and body language. The emotion is vivid and easy to read, with noticeable posture change.';
   return 'VERY EXPRESSIVE — highly exaggerated, dramatic anime expression with strong body language. Think over-the-top shoujo/otome reactions with large emotional displays.';
+}
+
+/**
+ * Build the full character generation prompt, tuned for attractive anime characters.
+ */
+function buildCharacterPrompt(characterName: string, description: string): string {
+  return [
+    // Style anchor — this is the most important part for getting anime output
+    'masterpiece, best quality, highly detailed anime illustration,',
+    'beautiful 2D anime character art, otome game visual novel sprite,',
+    'bishounen bishoujo character design,',
+    // Character specifics
+    `character name: ${characterName || 'Original Character'},`,
+    `${description},`,
+    // Body & pose requirements
+    'full body standing pose, head to feet visible, character standing upright,',
+    'single character, centered in frame, portrait orientation,',
+    // Art style reinforcement
+    'clean sharp linework, cel shading, soft pastel color palette,',
+    'large expressive anime eyes, delicate facial features, attractive face,',
+    'light bloom effects, gentle shading, vivid hair color,',
+    'premium anime art quality like Mystic Messenger or Ikemen Series,',
+    // Background requirement
+    'plain solid white background, no background elements,',
+    'no scenery, no decorations, no shadows on ground, clean cutout sprite',
+  ].join(' ');
+}
+
+/**
+ * Build the expression generation prompt.
+ * Used in img2img mode — keeps the character but changes the expression.
+ */
+function buildExpressionPrompt(
+  characterName: string,
+  expression: string,
+  expressiveness: number,
+): string {
+  const expressivenessDesc = getExpressivenessDescription(expressiveness);
+
+  return [
+    'masterpiece, best quality, highly detailed anime illustration,',
+    'beautiful 2D anime character art, otome game visual novel sprite,',
+    `${characterName || 'anime character'} showing "${expression}" expression,`,
+    `${expressivenessDesc},`,
+    'full body standing pose, head to feet visible, same character design,',
+    'same clothing, same hair style, same hair color, same eye color,',
+    `change only the facial expression and body language to show "${expression}",`,
+    'clean sharp linework, cel shading, soft pastel color palette,',
+    'large expressive anime eyes, attractive anime face,',
+    'plain solid white background, no background elements,',
+    'no scenery, no decorations, clean cutout sprite',
+  ].join(' ');
+}
+
+/**
+ * Map expressiveness level to img2img strength.
+ * Lower expressiveness → lower strength (keeps closer to original).
+ * Higher expressiveness → higher strength (allows more change).
+ */
+function expressivenessToStrength(level: number): number {
+  // Range: 0.45 (very muted) to 0.75 (very expressive)
+  const minStrength = 0.45;
+  const maxStrength = 0.75;
+  return minStrength + (level / 100) * (maxStrength - minStrength);
 }
 
 // ============================================================
@@ -92,31 +232,40 @@ interface RequestBody {
 }
 
 export async function POST(req: NextRequest) {
-  if (!process.env.GEMINI_API_KEY) {
-    return NextResponse.json({ error: 'Gemini API key not configured' }, { status: 500 });
-  }
-
   try {
     const body: RequestBody = await req.json();
 
     switch (body.action) {
       case 'scene_dialogue':
+        // Scene dialogue still uses Gemini for text generation
+        if (!process.env.GEMINI_API_KEY) {
+          return NextResponse.json({ error: 'Gemini API key not configured' }, { status: 500 });
+        }
         return await handleSceneDialogue(body);
+
       case 'generate_character':
+        if (!STABILITY_API_KEY) {
+          return NextResponse.json({ error: 'Stability AI API key not configured' }, { status: 500 });
+        }
         return await handleCharacterGeneration(body);
+
       case 'generate_expression':
+        if (!STABILITY_API_KEY) {
+          return NextResponse.json({ error: 'Stability AI API key not configured' }, { status: 500 });
+        }
         return await handleExpressionGeneration(body);
+
       default:
         return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
     }
   } catch (error) {
-    console.error('Gemini route error:', error);
+    console.error('API route error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 // ============================================================
-// Character Image Generation
+// Character Image Generation (Stability AI)
 // ============================================================
 
 async function handleCharacterGeneration(body: RequestBody) {
@@ -126,47 +275,37 @@ async function handleCharacterGeneration(body: RequestBody) {
     referenceImageUrl?: string;
   };
 
-  const charPrompt = `Create an anime 2D otome visual novel character sprite — FULL BODY standing pose on a TRANSPARENT BACKGROUND.
-
-Character: ${characterName || 'Original Character'}
-Description: ${prompt}
-
-Art Style Requirements:
-- ANIME 2D OTOME ART STYLE — soft, romantic visual novel aesthetic with clean linework
-- Bishounen/Bishoujo character design with large expressive eyes, delicate features
-- Soft pastel color palette with gentle shading and light bloom effects
-- FULL BODY standing pose — head to feet visible, character standing upright
-- Neutral/default expression
-- Premium quality like Mystic Messenger, Ikemen Series, or Obey Me
-- Portrait orientation (tall, narrow) — character centered in frame
-- Consistent proportions — the face should be clearly visible and detailed enough to swap later
-
-BACKGROUND REQUIREMENT — THIS IS CRITICAL:
-- The background MUST be completely TRANSPARENT / EMPTY / BLANK
-- Do NOT draw ANY background elements — no scenery, no ground, no shadows, no gradients, no decorations, no arches, no sparkles, no environment
-- The character should be a CUTOUT SPRITE floating on nothing — like a PNG sticker with transparency
-- Think of this as a character sprite that will be overlaid on top of separate background images in a visual novel engine
-- If you cannot make the background transparent, use a SOLID BRIGHT GREEN (#00FF00) chroma key background instead`;
+  const fullPrompt = buildCharacterPrompt(characterName, prompt);
 
   try {
     let result;
+
     if (referenceImageUrl && referenceImageUrl.startsWith('data:')) {
+      // Image-to-image: use the reference image as a starting point
       const [meta, data] = referenceImageUrl.split(',');
       const mimeType = meta.match(/data:(.*);/)?.[1] || 'image/png';
-      const imgData: GeminiImageData = { inlineData: { data, mimeType } };
-      result = await generateImageFromRef(
-        `Using this reference image as inspiration for the character design and style:\n\n${charPrompt}`,
-        imgData
+
+      result = await generateImageToImage(
+        fullPrompt,
+        ANIME_NEGATIVE_PROMPT,
+        data,
+        mimeType,
+        0.70, // Moderate strength — keeps reference likeness but generates in anime style
       );
     } else {
-      result = await generateImage(charPrompt);
+      // Pure text-to-image
+      result = await generateImage(
+        fullPrompt,
+        ANIME_NEGATIVE_PROMPT,
+        '2:3', // Portrait orientation for full-body characters
+      );
     }
 
     if (result) {
       return NextResponse.json(result);
     }
     return NextResponse.json({
-      error: 'All image models failed. Try again or upload manually.',
+      error: 'All Stability AI models failed. Try again or upload manually.',
     }, { status: 500 });
   } catch (error) {
     console.error('Character generation error:', error);
@@ -175,7 +314,7 @@ BACKGROUND REQUIREMENT — THIS IS CRITICAL:
 }
 
 // ============================================================
-// Expression Generation (single)
+// Expression Generation (Stability AI img2img)
 // ============================================================
 
 async function handleExpressionGeneration(body: RequestBody) {
@@ -186,52 +325,62 @@ async function handleExpressionGeneration(body: RequestBody) {
     expressiveness?: number;
   };
 
-  const expressivenessDesc = getExpressivenessDescription(expressiveness);
+  const fullPrompt = buildExpressionPrompt(characterName, expression, expressiveness);
+  const strength = expressivenessToStrength(expressiveness);
 
   try {
-    const prompt = `Generate a FULL BODY standing pose of this anime 2D otome-style character showing a "${expression}" expression.
-
-Character: ${characterName || 'Unknown'}
-Target Expression: ${expression}
-
-Expressiveness Level: ${expressiveness}/100
-${expressivenessDesc}
-
-Art Style Requirements:
-- FULL BODY standing pose — head to feet visible, same framing as the reference image
-- ANIME 2D OTOME ART STYLE — soft, romantic visual novel aesthetic with clean linework
-- Bishounen/Bishoujo character design with large expressive eyes, delicate features
-- Soft pastel color palette with gentle shading and light bloom effects
-- Keep the EXACT same art style, clothing, hair style, hair color, eye color, and character design
-- Change the FACIAL EXPRESSION and BODY LANGUAGE to show "${expression}"
-- Portrait orientation (tall, narrow) — character centered in frame
-
-BACKGROUND REQUIREMENT — THIS IS CRITICAL:
-- The background MUST be completely TRANSPARENT / EMPTY / BLANK
-- Do NOT draw ANY background elements — no scenery, no ground, no shadows, no gradients, no decorations, no arches, no sparkles, no environment
-- The character should be a CUTOUT SPRITE floating on nothing — like a PNG sticker with transparency
-- This is a character sprite that will be overlaid on top of separate background images
-- If you cannot make the background transparent, use a SOLID BRIGHT GREEN (#00FF00) chroma key background instead`;
-
     if (baseImageUrl && baseImageUrl.startsWith('data:')) {
       const [meta, data] = baseImageUrl.split(',');
       const mimeType = meta.match(/data:(.*);/)?.[1] || 'image/png';
-      const imgData: GeminiImageData = { inlineData: { data, mimeType } };
 
-      const result = await generateImageFromRef(prompt, imgData);
+      const result = await generateImageToImage(
+        fullPrompt,
+        ANIME_NEGATIVE_PROMPT + ', same pose as original, do not change character design',
+        data,
+        mimeType,
+        strength,
+      );
+
       if (result) return NextResponse.json(result);
 
       return NextResponse.json({
         imageUrl: null,
         message: 'Expression generation failed. Try again or upload manually.',
       });
-    } else {
-      const result = await generateImage(prompt);
-      if (result) return NextResponse.json(result);
+    } else if (baseImageUrl) {
+      // If it's a URL (Firebase Storage), fetch it first then do img2img
+      try {
+        const imgRes = await fetch(baseImageUrl);
+        if (imgRes.ok) {
+          const buffer = Buffer.from(await imgRes.arrayBuffer());
+          const base64 = buffer.toString('base64');
+          const contentType = imgRes.headers.get('content-type') || 'image/png';
+
+          const result = await generateImageToImage(
+            fullPrompt,
+            ANIME_NEGATIVE_PROMPT,
+            base64,
+            contentType,
+            strength,
+          );
+          if (result) return NextResponse.json(result);
+        }
+      } catch (err) {
+        console.error('Failed to fetch base image URL:', err);
+      }
+
+      // Fallback: text-to-image (won't match character perfectly but better than nothing)
+      const fallback = await generateImage(fullPrompt, ANIME_NEGATIVE_PROMPT, '2:3');
+      if (fallback) return NextResponse.json(fallback);
 
       return NextResponse.json({
         imageUrl: null,
-        message: 'Base image could not be processed. Upload the expression manually.',
+        message: 'Could not process the base image URL. Upload the expression manually.',
+      });
+    } else {
+      return NextResponse.json({
+        imageUrl: null,
+        message: 'No base image provided.',
       });
     }
   } catch (error) {
@@ -241,8 +390,10 @@ BACKGROUND REQUIREMENT — THIS IS CRITICAL:
 }
 
 // ============================================================
-// Scene Dialogue (existing functionality)
+// Scene Dialogue (Gemini — unchanged)
 // ============================================================
+
+const TEXT_MODEL = 'gemini-2.0-flash';
 
 interface DialogueRequest {
   action: string;
