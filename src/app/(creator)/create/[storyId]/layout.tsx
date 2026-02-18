@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import { getStory, updateStory } from '@/lib/firestore-utils';
+import { getStory, updateStory, getScenes, getCharacters } from '@/lib/firestore-utils';
 import { Story } from '@/lib/types';
 import Link from 'next/link';
 
@@ -27,6 +27,7 @@ export default function StoryEditorLayout({
   const [story, setStory] = useState<Story | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
+  const [publishing, setPublishing] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -53,6 +54,28 @@ export default function StoryEditorLayout({
       setStory({ ...story, title: titleDraft.trim() });
     }
     setEditingTitle(false);
+  };
+
+  const handlePublish = async () => {
+    if (!story) return;
+    setPublishing(true);
+    try {
+      const [scenesData, charsData] = await Promise.all([
+        getScenes(storyId),
+        getCharacters(storyId),
+      ]);
+      const newPublished = !story.isPublished;
+      await updateStory(storyId, {
+        isPublished: newPublished,
+        sceneCount: scenesData.length,
+        characterCount: charsData.length,
+      });
+      setStory({ ...story, isPublished: newPublished, sceneCount: scenesData.length, characterCount: charsData.length });
+    } catch (err) {
+      console.error('Failed to publish:', err);
+    } finally {
+      setPublishing(false);
+    }
   };
 
   if (loading || !user) {
@@ -92,6 +115,24 @@ export default function StoryEditorLayout({
             {story?.title || 'Untitled Story'}
           </button>
         )}
+        <div className="ml-auto flex items-center gap-3">
+          {story?.isPublished && (
+            <span className="text-xs px-2 py-1 rounded-full bg-green-600/20 text-green-400 border border-green-600/30">
+              Published
+            </span>
+          )}
+          <button
+            onClick={handlePublish}
+            disabled={publishing}
+            className={`text-sm px-4 py-1.5 rounded-lg font-medium transition-colors ${
+              story?.isPublished
+                ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                : 'btn-accent'
+            }`}
+          >
+            {publishing ? 'Saving...' : story?.isPublished ? 'Unpublish' : 'Publish Story'}
+          </button>
+        </div>
       </div>
 
       {/* Tab Navigation */}

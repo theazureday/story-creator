@@ -63,6 +63,7 @@ export interface Character {
   color: string; // Hex color for dialogue name
   voiceEnabled: boolean;
   expressiveness: number; // 0-100 slider: 0 = very muted, 100 = very exaggerated
+  outfitVariants: OutfitVariant[]; // Different outfit versions of the character
   createdAt: number;
   updatedAt: number;
 }
@@ -122,6 +123,35 @@ export interface UserWallet {
   uid: string;
   coins: number;
   lastUpdated: number;
+}
+
+// --- Bookmark ---
+export interface Bookmark {
+  id: string; // odcId: uid_storyId
+  uid: string;
+  storyId: string;
+  createdAt: number;
+}
+
+// --- View History ---
+export interface ViewHistory {
+  id: string; // odcId: uid_storyId
+  uid: string;
+  storyId: string;
+  storyTitle: string;
+  storyCoverUrl: string;
+  lastPlayedAt: number;
+  scenesCompleted: number;
+  totalScenes: number;
+}
+
+// --- Character Outfit Variant ---
+export interface OutfitVariant {
+  id: string;
+  name: string; // e.g. "School Uniform", "Casual"
+  description: string;
+  imageUrl: string; // Full-body image in this outfit
+  prompt: string; // Prompt used to generate
 }
 
 // --- AI Dialogue ---

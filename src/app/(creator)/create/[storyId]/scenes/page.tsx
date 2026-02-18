@@ -426,18 +426,50 @@ export default function SceneBuilder() {
                         </label>
                       </div>
                       {selectedScene.characterIds.includes(char.id) && (
-                        <div className="ml-8">
-                          <label className="text-xs text-gray-400 block mb-1">Outfit Description</label>
-                          <Input
-                            value={selectedScene.outfits[char.id] || ''}
-                            onChange={(e) =>
-                              updateSelectedScene({
-                                outfits: { ...selectedScene.outfits, [char.id]: e.target.value },
-                              })
-                            }
-                            placeholder="e.g., wearing a red dress"
-                            className="input-jai text-white text-sm"
-                          />
+                        <div className="ml-8 space-y-2">
+                          {/* Outfit variant selector */}
+                          {(char.outfitVariants || []).length > 0 && (
+                            <div>
+                              <label className="text-xs text-gray-400 block mb-1">Outfit Variant</label>
+                              <select
+                                value={selectedScene.outfits[char.id] || ''}
+                                onChange={(e) =>
+                                  updateSelectedScene({
+                                    outfits: { ...selectedScene.outfits, [char.id]: e.target.value },
+                                  })
+                                }
+                                className="w-full rounded-lg px-3 py-2 text-white text-sm input-jai"
+                                style={{ background: 'var(--surface-light)' }}
+                              >
+                                <option value="">Default outfit</option>
+                                {(char.outfitVariants || []).map((v) => (
+                                  <option key={v.id} value={v.name}>
+                                    {v.name} — {v.description}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                          {/* Custom outfit text input */}
+                          <div>
+                            <label className="text-xs text-gray-400 block mb-1">
+                              {(char.outfitVariants || []).length > 0 ? 'Or describe custom outfit' : 'Outfit Description'}
+                            </label>
+                            <Input
+                              value={
+                                (char.outfitVariants || []).some(v => v.name === selectedScene.outfits[char.id])
+                                  ? ''
+                                  : selectedScene.outfits[char.id] || ''
+                              }
+                              onChange={(e) =>
+                                updateSelectedScene({
+                                  outfits: { ...selectedScene.outfits, [char.id]: e.target.value },
+                                })
+                              }
+                              placeholder="e.g., wearing a red dress"
+                              className="input-jai text-white text-sm"
+                            />
+                          </div>
                         </div>
                       )}
                     </div>

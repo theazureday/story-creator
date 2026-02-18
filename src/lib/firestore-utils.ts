@@ -13,7 +13,42 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage } from './firebase';
-import type { Story, Character, Scene, PlayerProgress, Background, KeyArt, UserWallet } from './types';
+import type { Story, Character, Scene, PlayerProgress, Background, KeyArt, UserWallet, Bookmark, ViewHistory } from './types';
+
+// ============================================================
+// Helper: strip undefined values to prevent Firestore errors
+// ============================================================
+function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      result[key] = value;
+    }
+  }
+  return result as T;
+}
+
+// ============================================================
+// Helper: sanitize scene with defaults for new fields
+// ============================================================
+export function sanitizeScene(scene: Partial<Scene> & { id: string; storyId: string }): Scene {
+  return {
+    id: scene.id,
+    storyId: scene.storyId,
+    title: scene.title || 'Untitled Scene',
+    orderIndex: scene.orderIndex ?? 0,
+    prompt: scene.prompt || '',
+    backgroundImageUrl: scene.backgroundImageUrl || '',
+    characterIds: scene.characterIds || [],
+    outfits: scene.outfits || {},
+    winConditions: scene.winConditions || [],
+    unlockedBySceneId: scene.unlockedBySceneId ?? null,
+    isPremium: scene.isPremium ?? false,
+    coinCost: scene.coinCost ?? 0,
+    createdAt: scene.createdAt || Date.now(),
+    updatedAt: scene.updatedAt || Date.now(),
+  };
+}
 
 // ============================================================
 // Stories
@@ -80,10 +115,8 @@ export async function updateCharacter(
   charId: string,
   data: Partial<Character>
 ): Promise<void> {
-  await updateDoc(doc(db, 'stories', storyId, 'characters', charId), {
-    ...data,
-    updatedAt: Date.now(),
-  });
+  const cleaned = stripUndefined({ ...data, updatedAt: Date.now() });
+  await setDoc(doc(db, 'stories', storyId, 'characters', charId), cleaned, { merge: true });
 }
 
 export async function deleteCharacter(storyId: string, charId: string): Promise<void> {
@@ -104,12 +137,12 @@ export async function getScenes(storyId: string): Promise<Scene[]> {
     orderBy('orderIndex', 'asc')
   );
   const snap = await getDocs(q);
-  return snap.docs.map((d) => d.data() as Scene);
+  return snap.docs.map((d) => sanitizeScene(d.data() as Scene));
 }
 
 export async function getScene(storyId: string, sceneId: string): Promise<Scene | null> {
   const snap = await getDoc(doc(db, 'stories', storyId, 'scenes', sceneId));
-  return snap.exists() ? (snap.data() as Scene) : null;
+  return snap.exists() ? sanitizeScene(snap.data() as Scene) : null;
 }
 
 export async function updateScene(
@@ -117,10 +150,8 @@ export async function updateScene(
   sceneId: string,
   data: Partial<Scene>
 ): Promise<void> {
-  await updateDoc(doc(db, 'stories', storyId, 'scenes', sceneId), {
-    ...data,
-    updatedAt: Date.now(),
-  });
+  const cleaned = stripUndefined({ ...data, updatedAt: Date.now() });
+  await setDoc(doc(db, 'stories', storyId, 'scenes', sceneId), cleaned, { merge: true });
 }
 
 export async function deleteScene(storyId: string, sceneId: string): Promise<void> {
@@ -262,4 +293,84 @@ export async function deleteImage(path: string): Promise<void> {
   } catch {
     // Ignore if file doesn't exist
   }
+}
+
+// ============================================================
+// Bookmarks
+// ============================================================
+
+function bookmarkDocId(uid: string, storyId: string) {
+  return `${uid}_${storyId}`;
+}
+
+export async function addBookmark(uid: string, storyId: string): Promise<void> {
+  const id = bookmarkDocId(uid, storyId);
+  await setDoc(doc(db, 'bookmarks', id), {
+    id,
+    uid,
+    storyId,
+    createdAt: Date.now(),
+  });
+}
+
+export async function removeBookmark(uid: string, storyId: string): Promise<void> {
+  await deleteDoc(doc(db, 'bookmarks', bookmarkDocId(uid, storyId)));
+}
+
+export async function getBookmark(uid: string, storyId: string): Promise<Bookmark | null> {
+  const snap = await getDoc(doc(db, 'bookmarks', bookmarkDocId(uid, storyId)));
+  return snap.exists() ? (snap.data() as Bookmark) : null;
+}
+
+export async function getUserBookmarks(uid: string): Promise<Bookmark[]> {
+  const q = query(collection(db, 'bookmarks'), where('uid', '==', uid), orderBy('createdAt', 'desc'));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => d.data() as Bookmark);
+}
+
+// ============================================================
+// View History
+// ============================================================
+
+function historyDocId(uid: string, storyId: string) {
+  return `${uid}_${storyId}`;
+}
+
+export async function upsertViewHistory(
+  uid: string,
+  storyId: string,
+  storyTitle: string,
+  storyCoverUrl: string,
+  scenesCompleted: number,
+  totalScenes: number
+): Promise<void> {
+  const id = historyDocId(uid, storyId);
+  await setDoc(doc(db, 'viewHistory', id), {
+    id,
+    uid,
+    storyId,
+    storyTitle,
+    storyCoverUrl,
+    lastPlayedAt: Date.now(),
+    scenesCompleted,
+    totalScenes,
+  }, { merge: true });
+}
+
+export async function getUserViewHistory(uid: string): Promise<ViewHistory[]> {
+  const q = query(collection(db, 'viewHistory'), where('uid', '==', uid), orderBy('lastPlayedAt', 'desc'));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => d.data() as ViewHistory);
+}
+
+// ============================================================
+// Wallet Initialization (auto-create with 500 coins)
+// ============================================================
+
+export async function getOrCreateWallet(uid: string): Promise<UserWallet> {
+  const wallet = await getUserWallet(uid);
+  if (wallet) return wallet;
+  const newWallet: UserWallet = { uid, coins: 500, lastUpdated: Date.now() };
+  await setDoc(doc(db, 'userWallets', uid), newWallet);
+  return newWallet;
 }

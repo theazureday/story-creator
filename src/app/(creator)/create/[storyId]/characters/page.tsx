@@ -11,7 +11,7 @@ import {
   uploadImage,
 } from '@/lib/firestore-utils';
 import { generateId } from '@/lib/utils';
-import { Character, ExpressionKey } from '@/lib/types';
+import { Character, ExpressionKey, OutfitVariant } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -315,6 +315,11 @@ export default function CharacterBuilder() {
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [lightboxLabel, setLightboxLabel] = useState('');
 
+  // Outfit variant state
+  const [generatingOutfit, setGeneratingOutfit] = useState(false);
+  const [outfitPrompt, setOutfitPrompt] = useState('');
+  const [outfitName, setOutfitName] = useState('');
+
   const selectedChar = characters.find((c) => c.id === selectedCharId) || null;
 
   // Helper: update a character in local state
@@ -370,6 +375,7 @@ export default function CharacterBuilder() {
       profilePicUrl: '',
       voiceEnabled: false,
       expressiveness: 50,
+      outfitVariants: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -414,6 +420,18 @@ export default function CharacterBuilder() {
         }
       }
       charToSave.expressions = newExpressions;
+
+      // Upload outfit variant images that are data URLs
+      if (charToSave.outfitVariants) {
+        const newVariants = [...charToSave.outfitVariants];
+        for (let i = 0; i < newVariants.length; i++) {
+          if (newVariants[i].imageUrl?.startsWith('data:')) {
+            const path = `stories/${storyId}/characters/${charToSave.id}/outfit_${newVariants[i].id}.png`;
+            newVariants[i] = { ...newVariants[i], imageUrl: await uploadImage(path, dataUrlToBlob(newVariants[i].imageUrl)) };
+          }
+        }
+        charToSave.outfitVariants = newVariants;
+      }
 
       await updateCharacterFB(storyId, charToSave.id, charToSave);
       setCharacters(
@@ -524,6 +542,7 @@ export default function CharacterBuilder() {
       color: '#a855f7',
       voiceEnabled: false,
       expressiveness: 50,
+      outfitVariants: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -725,6 +744,62 @@ export default function CharacterBuilder() {
 
     setExprProgress(`Done! Generated ${succeeded}/${exprsToGenerate.length} new expressions${alreadyDone > 0 ? ` (${alreadyDone} already existed)` : ''}.`);
     setGeneratingAllExprs(false);
+  };
+
+  // ============================================================
+  // Outfit Variant Generation
+  // ============================================================
+
+  const generateOutfitVariant = async () => {
+    if (!selectedChar?.baseImageUrl || !outfitPrompt.trim() || !outfitName.trim()) return;
+    setGeneratingOutfit(true);
+    try {
+      const compressedBase = selectedChar.baseImageUrl.startsWith('data:')
+        ? await compressImage(selectedChar.baseImageUrl)
+        : selectedChar.baseImageUrl;
+
+      const res = await fetch('/api/gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'generate_expression',
+          baseImageUrl: compressedBase,
+          expression: `wearing ${outfitPrompt}`,
+          characterName: selectedChar.displayName,
+          expressiveness: 50,
+        }),
+      });
+      if (!res.ok) { alert('Outfit generation failed. Try again.'); return; }
+      const data = await res.json();
+      if (data.imageUrl) {
+        const cleanedUrl = await removeBackground(data.imageUrl);
+        const newVariant: OutfitVariant = {
+          id: generateId(),
+          name: outfitName,
+          description: outfitPrompt,
+          imageUrl: cleanedUrl,
+          prompt: outfitPrompt,
+        };
+        const variants = [...(selectedChar.outfitVariants || []), newVariant];
+        updateSelected({ outfitVariants: variants });
+        setOutfitName('');
+        setOutfitPrompt('');
+      } else {
+        alert(data.message || data.error || 'Outfit generation failed.');
+      }
+    } catch (err) {
+      console.error('Outfit generation error:', err);
+      alert('Outfit generation failed. Try again.');
+    } finally {
+      setGeneratingOutfit(false);
+    }
+  };
+
+  const deleteOutfitVariant = (variantId: string) => {
+    if (!selectedChar) return;
+    updateSelected({
+      outfitVariants: (selectedChar.outfitVariants || []).filter((v) => v.id !== variantId),
+    });
   };
 
   // ============================================================
@@ -1275,6 +1350,81 @@ export default function CharacterBuilder() {
                       </div>
                     );
                   })}
+                </div>
+              </Card>
+
+              {/* Outfit Variants */}
+              <Card className="bg-gray-900 border-gray-800 p-6 space-y-4">
+                <h2 className="text-xl font-bold text-white">Outfit Variants</h2>
+                <p className="text-gray-400 text-xs">Create different outfit versions of this character. These can be assigned per-scene.</p>
+
+                {/* Existing variants */}
+                {(selectedChar.outfitVariants || []).length > 0 && (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {(selectedChar.outfitVariants || []).map((variant) => (
+                      <div key={variant.id} className="text-center relative group">
+                        <div
+                          className="aspect-[3/4] bg-gray-800 rounded-lg overflow-hidden mb-2 cursor-pointer hover:ring-2 hover:ring-white/30"
+                          onClick={() => { setLightboxImage(variant.imageUrl); setLightboxLabel(variant.name); }}
+                        >
+                          {variant.imageUrl ? (
+                            <img src={variant.imageUrl} alt={variant.name} className="w-full h-full object-contain" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-gray-600">?</div>
+                          )}
+                        </div>
+                        <p className="text-gray-300 text-xs font-medium">{variant.name}</p>
+                        <p className="text-gray-500 text-[10px] line-clamp-1">{variant.description}</p>
+                        <button
+                          onClick={() => deleteOutfitVariant(variant.id)}
+                          className="absolute top-1 right-1 w-5 h-5 bg-red-600/80 hover:bg-red-500 text-white rounded-full text-[10px] opacity-0 group-hover:opacity-100 transition flex items-center justify-center"
+                          title="Remove variant"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Generate new variant */}
+                <div className="bg-purple-900/20 border border-purple-500/20 rounded-lg p-4 space-y-3">
+                  <p className="text-purple-300 text-xs font-semibold">Add New Outfit</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-gray-400 text-[10px] block mb-1">Outfit Name</label>
+                      <Input
+                        value={outfitName}
+                        onChange={(e) => setOutfitName(e.target.value)}
+                        placeholder="e.g. School Uniform"
+                        className="bg-gray-800 border-gray-700 text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-gray-400 text-[10px] block mb-1">Outfit Description</label>
+                      <Input
+                        value={outfitPrompt}
+                        onChange={(e) => setOutfitPrompt(e.target.value)}
+                        placeholder="e.g. a navy blue school uniform with red tie"
+                        className="bg-gray-800 border-gray-700 text-white text-xs"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    onClick={generateOutfitVariant}
+                    disabled={generatingOutfit || !outfitPrompt.trim() || !outfitName.trim() || !selectedChar.baseImageUrl}
+                    size="sm"
+                    className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-xs"
+                  >
+                    {generatingOutfit ? (
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Generating Outfit...
+                      </span>
+                    ) : (
+                      'Generate Outfit Variant'
+                    )}
+                  </Button>
                 </div>
               </Card>
 

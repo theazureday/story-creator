@@ -57,6 +57,12 @@ export default function BrowsePage() {
             {user ? (
               <>
                 <button
+                  onClick={() => router.push('/library')}
+                  className="text-sm text-gray-400 hover:text-white"
+                >
+                  My Library
+                </button>
+                <button
                   onClick={() => router.push('/create')}
                   className="text-sm text-gray-400 hover:text-white"
                 >
