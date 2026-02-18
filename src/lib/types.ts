@@ -61,6 +61,8 @@ export interface Character {
   expressions: Partial<Record<ExpressionKey, string>>; // expression -> Storage URL
   profilePicUrl: string;
   color: string; // Hex color for dialogue name
+  voiceEnabled: boolean;
+  expressiveness: number; // 0-100 slider: 0 = very muted, 100 = very exaggerated
   createdAt: number;
   updatedAt: number;
 }
