@@ -733,32 +733,17 @@ export default function CharacterBuilder() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-950">
+      <div className="flex items-center justify-center flex-1">
         <div className="text-center">
-          <div className="w-8 h-8 border-2 border-violet-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-violet-400 text-sm">Loading characters...</p>
+          <div className="w-8 h-8 border-2 border-purple-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-purple-400 text-sm">Loading characters...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 flex flex-col">
-      {/* Header */}
-      <div className="border-b border-gray-800 bg-gray-900 px-4 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-white">Character Builder</h1>
-            <p className="text-gray-400 text-sm">Create and manage story characters</p>
-          </div>
-          <Button
-            onClick={() => setShowAIGenerator(true)}
-            className="bg-purple-600 hover:bg-purple-500 text-white"
-          >
-            ✨ AI Generate Character
-          </Button>
-        </div>
-      </div>
+    <div className="flex-1 flex flex-col overflow-hidden">
 
       {/* Lightbox Modal */}
       {lightboxImage && (
@@ -871,7 +856,7 @@ export default function CharacterBuilder() {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar - Character List */}
-        <div className="w-64 border-r border-gray-800 bg-gray-900 overflow-y-auto flex flex-col">
+        <div className="w-64 border-r overflow-y-auto flex flex-col" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
           <div className="p-4 space-y-2 flex-1">
             {characters.map((char) => (
               <button
@@ -907,18 +892,25 @@ export default function CharacterBuilder() {
             ))}
           </div>
 
-          <div className="p-4 border-t border-gray-800">
+          <div className="p-4 border-t space-y-2" style={{ borderColor: 'var(--border)' }}>
+            <button
+              onClick={() => setShowAIGenerator(true)}
+              className="btn-accent w-full text-center text-sm"
+            >
+              AI Generate
+            </button>
             <Button
               onClick={() => setShowAddCharDialog(true)}
-              className="w-full bg-violet-600 hover:bg-violet-700 text-white"
+              variant="outline"
+              className="w-full border-gray-600 text-gray-300 hover:text-white"
             >
-              + Add Character
+              + Add Manually
             </Button>
           </div>
         </div>
 
         {/* Main Area */}
-        <div className="flex-1 overflow-y-auto bg-gray-950">
+        <div className="flex-1 overflow-y-auto" style={{ background: 'var(--background)' }}>
           {selectedChar ? (
             <div className="max-w-4xl mx-auto p-8 space-y-6">
               {/* Basic Info */}

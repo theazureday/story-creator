@@ -8,7 +8,6 @@ import { generateId } from '@/lib/utils';
 import { Story } from '@/lib/types';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -19,7 +18,6 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
 
 export default function CreatorDashboard() {
   const router = useRouter();
@@ -34,14 +32,10 @@ export default function CreatorDashboard() {
   });
   const [isCreating, setIsCreating] = useState(false);
 
-  // Redirect if not authenticated
   useEffect(() => {
-    if (!loading && !user) {
-      router.push('/login');
-    }
+    if (!loading && !user) router.push('/login');
   }, [user, loading, router]);
 
-  // Fetch user's stories
   useEffect(() => {
     if (user) {
       const fetchStories = async () => {
@@ -98,32 +92,28 @@ export default function CreatorDashboard() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-950">
-        <div className="text-violet-400">Loading...</div>
+      <div className="flex items-center justify-center min-h-screen" style={{ background: 'var(--background)' }}>
+        <div className="text-purple-400">Loading...</div>
       </div>
     );
   }
 
-  if (!user) {
-    return null;
-  }
+  if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-gray-950">
+    <div className="min-h-screen" style={{ background: 'var(--background)' }}>
       {/* Navigation Bar */}
-      <nav className="border-b border-gray-800 bg-gray-900">
+      <nav className="border-b" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <Link href="/" className="text-2xl font-bold text-violet-500 hover:text-violet-400">
+          <Link href="/" className="text-2xl font-bold text-purple-400 hover:text-purple-300 transition-colors">
             Story Creator
           </Link>
           <div className="flex items-center gap-4">
-            <span className="text-gray-400">Welcome, {user.email?.split('@')[0]}</span>
+            <span className="text-gray-400 text-sm">Welcome, {user.email?.split('@')[0]}</span>
             <Button
-              onClick={() => {
-                // Sign out logic
-              }}
+              onClick={() => {/* Sign out */}}
               variant="outline"
-              className="border-gray-700 text-gray-300 hover:bg-gray-800"
+              className="border-gray-600 text-gray-300 hover:text-white hover:border-gray-500 text-sm"
             >
               Sign Out
             </Button>
@@ -134,14 +124,12 @@ export default function CreatorDashboard() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-4xl font-bold text-white">My Stories</h1>
+          <h1 className="text-3xl font-bold text-white">My Stories</h1>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger className="inline-flex">
-              <Button className="bg-violet-600 hover:bg-violet-700 text-white">
-                New Story
-              </Button>
+              <button className="btn-accent">New Story</button>
             </DialogTrigger>
-            <DialogContent className="bg-gray-900 border-gray-800">
+            <DialogContent style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
               <DialogHeader>
                 <DialogTitle className="text-white">Create New Story</DialogTitle>
                 <DialogDescription className="text-gray-400">
@@ -150,44 +138,32 @@ export default function CreatorDashboard() {
               </DialogHeader>
               <form onSubmit={handleCreateStory} className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium text-gray-300 block mb-2">
-                    Story Title *
-                  </label>
+                  <label className="text-sm font-medium text-gray-300 block mb-2">Story Title *</label>
                   <Input
                     value={formData.title}
-                    onChange={(e) =>
-                      setFormData({ ...formData, title: e.target.value })
-                    }
+                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                     placeholder="Enter story title"
-                    className="bg-gray-800 border-gray-700 text-white placeholder-gray-500"
+                    className="input-jai text-white placeholder-gray-500"
                     required
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-gray-300 block mb-2">
-                    Description
-                  </label>
+                  <label className="text-sm font-medium text-gray-300 block mb-2">Description</label>
                   <Textarea
                     value={formData.description}
-                    onChange={(e) =>
-                      setFormData({ ...formData, description: e.target.value })
-                    }
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     placeholder="Describe your story..."
-                    className="bg-gray-800 border-gray-700 text-white placeholder-gray-500"
+                    className="input-jai text-white placeholder-gray-500"
                     rows={4}
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-gray-300 block mb-2">
-                    Tags (comma-separated)
-                  </label>
+                  <label className="text-sm font-medium text-gray-300 block mb-2">Tags (comma-separated)</label>
                   <Input
                     value={formData.tags}
-                    onChange={(e) =>
-                      setFormData({ ...formData, tags: e.target.value })
-                    }
+                    onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
                     placeholder="adventure, fantasy, mystery"
-                    className="bg-gray-800 border-gray-700 text-white placeholder-gray-500"
+                    className="input-jai text-white placeholder-gray-500"
                   />
                 </div>
                 <div className="flex gap-3 justify-end pt-4">
@@ -195,17 +171,17 @@ export default function CreatorDashboard() {
                     type="button"
                     onClick={() => setIsDialogOpen(false)}
                     variant="outline"
-                    className="border-gray-700 text-gray-300 hover:bg-gray-800"
+                    className="border-gray-600 text-gray-300"
                   >
                     Cancel
                   </Button>
-                  <Button
+                  <button
                     type="submit"
                     disabled={isCreating || !formData.title.trim()}
-                    className="bg-violet-600 hover:bg-violet-700 text-white"
+                    className="btn-accent disabled:opacity-50"
                   >
                     {isCreating ? 'Creating...' : 'Create Story'}
-                  </Button>
+                  </button>
                 </div>
               </form>
             </DialogContent>
@@ -218,39 +194,30 @@ export default function CreatorDashboard() {
             <div className="text-gray-400">Loading stories...</div>
           </div>
         ) : stories.length === 0 ? (
-          <Card className="bg-gray-900 border-gray-800 p-12 text-center">
-            <p className="text-gray-400 text-lg mb-4">
-              No stories yet. Create your first story!
-            </p>
+          <div className="card-jai p-12 text-center">
+            <p className="text-gray-400 text-lg mb-4">No stories yet. Create your first story!</p>
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
               <DialogTrigger className="inline-flex">
-                <Button className="bg-violet-600 hover:bg-violet-700 text-white">
-                  Create First Story
-                </Button>
+                <button className="btn-accent">Create First Story</button>
               </DialogTrigger>
             </Dialog>
-          </Card>
+          </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {stories.map((story) => (
-              <Link
-                key={story.id}
-                href={`/create/${story.id}/characters`}
-              >
-                <Card className="bg-gray-900 border-gray-800 overflow-hidden hover:border-violet-600 transition-colors h-full cursor-pointer group">
-                  {/* Cover Image or Gradient */}
-                  <div className="h-48 bg-gradient-to-br from-violet-600 to-purple-900 relative overflow-hidden">
+              <Link key={story.id} href={`/create/${story.id}/scenes`}>
+                <div className="card-jai overflow-hidden cursor-pointer group h-full">
+                  {/* Cover Image */}
+                  <div className="h-48 relative overflow-hidden" style={{ background: 'linear-gradient(135deg, var(--accent), #4f46e5)' }}>
                     {story.coverImageUrl ? (
                       <img
                         src={story.coverImageUrl}
                         alt={story.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
-                        <div className="text-violet-300 text-sm opacity-50">
-                          No cover image
-                        </div>
+                        <div className="text-purple-200 text-sm opacity-40">No cover image</div>
                       </div>
                     )}
                   </div>
@@ -262,9 +229,9 @@ export default function CreatorDashboard() {
                         {story.title}
                       </h3>
                       {story.isPublished && (
-                        <Badge className="bg-violet-600 text-white flex-shrink-0 whitespace-nowrap">
+                        <span className="text-xs font-medium px-2 py-1 rounded-full bg-purple-600/30 text-purple-300 flex-shrink-0">
                           Published
-                        </Badge>
+                        </span>
                       )}
                     </div>
 
@@ -273,23 +240,17 @@ export default function CreatorDashboard() {
                     </p>
 
                     {/* Stats */}
-                    <div className="flex gap-4 text-xs text-gray-500 pt-2 border-t border-gray-800">
+                    <div className="flex gap-4 text-xs text-gray-500 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
                       <div className="flex flex-col">
-                        <span className="text-violet-400 font-semibold">
-                          {story.playCount || 0}
-                        </span>
+                        <span className="text-purple-400 font-semibold">{story.playCount || 0}</span>
                         <span>Plays</span>
                       </div>
                       <div className="flex flex-col">
-                        <span className="text-violet-400 font-semibold">
-                          {story.characterCount || 0}
-                        </span>
+                        <span className="text-purple-400 font-semibold">{story.characterCount || 0}</span>
                         <span>Characters</span>
                       </div>
                       <div className="flex flex-col">
-                        <span className="text-violet-400 font-semibold">
-                          {story.sceneCount || 0}
-                        </span>
+                        <span className="text-purple-400 font-semibold">{story.sceneCount || 0}</span>
                         <span>Scenes</span>
                       </div>
                       <div className="flex flex-col ml-auto">
@@ -299,7 +260,7 @@ export default function CreatorDashboard() {
                       </div>
                     </div>
                   </div>
-                </Card>
+                </div>
               </Link>
             ))}
           </div>

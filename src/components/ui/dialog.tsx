@@ -43,7 +43,7 @@ export function DialogTrigger({ children, className, ...props }: HTMLAttributes<
   );
 }
 
-export function DialogContent({ children, className }: { children: ReactNode; className?: string }) {
+export function DialogContent({ children, className, style }: { children: ReactNode; className?: string; style?: React.CSSProperties }) {
   const { open, setOpen } = useContext(DialogContext);
   if (!open) return null;
 
@@ -53,8 +53,9 @@ export function DialogContent({ children, className }: { children: ReactNode; cl
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setOpen(false)} />
       {/* Content */}
       <div
+        style={style}
         className={cn(
-          'relative z-10 bg-gray-900 border border-gray-800 rounded-xl shadow-xl w-full max-w-md mx-4 p-6 animate-slide-up',
+          'relative z-10 border rounded-xl shadow-xl w-full max-w-md mx-4 p-6 animate-slide-up surface-jai',
           className
         )}
       >

@@ -3,8 +3,17 @@
 @tailwind utilities;
 
 :root {
-  --background: #030712;
+  --background: #0f0f1e;
   --foreground: #f9fafb;
+  --surface: #1a1a2e;
+  --surface-light: #222240;
+  --accent: #7c3aed;
+  --accent-hover: #6d28d9;
+  --accent-secondary: #6366f1;
+  --border: #2d2d4a;
+  --border-light: #3d3d5c;
+  --text-muted: #9ca3af;
+  --text-secondary: #d1d5db;
 }
 
 body {
@@ -54,6 +63,67 @@ body {
   animation: pulse-soft 2s ease-in-out infinite;
 }
 
+/* JanitorAI-inspired card styling */
+.card-jai {
+  @apply rounded-xl border transition-all duration-300;
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.card-jai:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 20px rgba(124, 58, 237, 0.15);
+}
+
+/* Gradient accent button */
+.btn-accent {
+  @apply font-medium rounded-lg px-4 py-2 transition-all duration-200 text-white;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-secondary) 100%);
+}
+
+.btn-accent:hover {
+  background: linear-gradient(135deg, var(--accent-hover) 0%, var(--accent) 100%);
+  box-shadow: 0 4px 15px rgba(124, 58, 237, 0.3);
+}
+
+/* Input focus glow */
+.input-jai {
+  @apply transition-all duration-200;
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.input-jai:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.25);
+}
+
+/* Tab navigation */
+.tab-jai {
+  @apply px-4 py-2.5 text-sm font-medium transition-all duration-200 relative;
+  color: var(--text-muted);
+}
+
+.tab-jai:hover {
+  color: var(--text-secondary);
+}
+
+.tab-jai.active {
+  color: #ffffff;
+}
+
+.tab-jai.active::after {
+  content: '';
+  @apply absolute bottom-0 left-0 right-0 h-0.5;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-secondary) 100%);
+}
+
+/* Surface sections */
+.surface-jai {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
@@ -64,15 +134,32 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #374151;
+  background: var(--border);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #4b5563;
+  background: var(--border-light);
 }
 
 /* Mobile input focus fix */
 input:focus, textarea:focus {
   font-size: 16px !important;
+}
+
+/* Auto-save indicator */
+.autosave-indicator {
+  @apply text-xs font-medium px-2 py-1 rounded-full;
+}
+
+.autosave-indicator.saving {
+  @apply text-yellow-400 bg-yellow-900/30;
+}
+
+.autosave-indicator.saved {
+  @apply text-green-400 bg-green-900/30;
+}
+
+.autosave-indicator.error {
+  @apply text-red-400 bg-red-900/30;
 }

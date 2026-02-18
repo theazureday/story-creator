@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage } from './firebase';
-import type { Story, Character, Scene, PlayerProgress } from './types';
+import type { Story, Character, Scene, PlayerProgress, Background, KeyArt, UserWallet } from './types';
 
 // ============================================================
 // Stories
@@ -125,6 +125,99 @@ export async function updateScene(
 
 export async function deleteScene(storyId: string, sceneId: string): Promise<void> {
   await deleteDoc(doc(db, 'stories', storyId, 'scenes', sceneId));
+}
+
+// ============================================================
+// Backgrounds
+// ============================================================
+
+export async function createBackground(storyId: string, bg: Background): Promise<void> {
+  await setDoc(doc(db, 'stories', storyId, 'backgrounds', bg.id), bg);
+}
+
+export async function getBackgrounds(storyId: string): Promise<Background[]> {
+  const snap = await getDocs(collection(db, 'stories', storyId, 'backgrounds'));
+  return snap.docs.map((d) => d.data() as Background);
+}
+
+export async function updateBackground(
+  storyId: string,
+  bgId: string,
+  data: Partial<Background>
+): Promise<void> {
+  await updateDoc(doc(db, 'stories', storyId, 'backgrounds', bgId), {
+    ...data,
+    updatedAt: Date.now(),
+  });
+}
+
+export async function deleteBackground(storyId: string, bgId: string): Promise<void> {
+  await deleteDoc(doc(db, 'stories', storyId, 'backgrounds', bgId));
+}
+
+// ============================================================
+// Key Art
+// ============================================================
+
+export async function createKeyArt(storyId: string, art: KeyArt): Promise<void> {
+  await setDoc(doc(db, 'stories', storyId, 'keyArt', art.id), art);
+}
+
+export async function getKeyArtItems(storyId: string): Promise<KeyArt[]> {
+  const snap = await getDocs(collection(db, 'stories', storyId, 'keyArt'));
+  return snap.docs.map((d) => d.data() as KeyArt);
+}
+
+export async function updateKeyArt(
+  storyId: string,
+  artId: string,
+  data: Partial<KeyArt>
+): Promise<void> {
+  await updateDoc(doc(db, 'stories', storyId, 'keyArt', artId), {
+    ...data,
+    updatedAt: Date.now(),
+  });
+}
+
+export async function deleteKeyArt(storyId: string, artId: string): Promise<void> {
+  await deleteDoc(doc(db, 'stories', storyId, 'keyArt', artId));
+}
+
+// ============================================================
+// User Wallet
+// ============================================================
+
+export async function getUserWallet(uid: string): Promise<UserWallet | null> {
+  const snap = await getDoc(doc(db, 'userWallets', uid));
+  return snap.exists() ? (snap.data() as UserWallet) : null;
+}
+
+export async function initializeWallet(uid: string, initialCoins = 0): Promise<void> {
+  await setDoc(doc(db, 'userWallets', uid), {
+    uid,
+    coins: initialCoins,
+    lastUpdated: Date.now(),
+  });
+}
+
+export async function deductCoins(uid: string, amount: number): Promise<boolean> {
+  const wallet = await getUserWallet(uid);
+  if (!wallet || wallet.coins < amount) return false;
+  await updateDoc(doc(db, 'userWallets', uid), {
+    coins: wallet.coins - amount,
+    lastUpdated: Date.now(),
+  });
+  return true;
+}
+
+export async function addCoins(uid: string, amount: number): Promise<void> {
+  const wallet = await getUserWallet(uid);
+  const current = wallet?.coins || 0;
+  await setDoc(doc(db, 'userWallets', uid), {
+    uid,
+    coins: current + amount,
+    lastUpdated: Date.now(),
+  });
 }
 
 // ============================================================

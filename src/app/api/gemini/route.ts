@@ -255,6 +255,18 @@ export async function POST(req: NextRequest) {
         }
         return await handleExpressionGeneration(body);
 
+      case 'generate_background':
+        if (!STABILITY_API_KEY) {
+          return NextResponse.json({ error: 'Stability AI API key not configured' }, { status: 500 });
+        }
+        return await handleBackgroundGeneration(body);
+
+      case 'generate_keyart':
+        if (!STABILITY_API_KEY) {
+          return NextResponse.json({ error: 'Stability AI API key not configured' }, { status: 500 });
+        }
+        return await handleKeyArtGeneration(body);
+
       default:
         return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
     }
@@ -386,6 +398,77 @@ async function handleExpressionGeneration(body: RequestBody) {
   } catch (error) {
     console.error('Expression generation error:', error);
     return NextResponse.json({ error: 'Failed to generate expression' }, { status: 500 });
+  }
+}
+
+// ============================================================
+// Background Generation (Stability AI)
+// ============================================================
+
+async function handleBackgroundGeneration(body: RequestBody) {
+  const { prompt } = body as unknown as { prompt: string };
+
+  const fullPrompt = [
+    'masterpiece, best quality, highly detailed anime background illustration,',
+    'beautiful 2D anime environment art, visual novel background,',
+    `${prompt},`,
+    'wide shot, establishing shot, cinematic composition,',
+    'rich color palette, atmospheric lighting, detailed scenery,',
+    'anime art style, clean linework, soft shading,',
+    'no characters, no people, no figures, empty scene,',
+    'high resolution background art, professional quality',
+  ].join(' ');
+
+  const negativePrompt = [
+    'photorealistic', 'photo', '3D render', 'CGI',
+    'people', 'characters', 'figures', 'person', 'human',
+    'blurry', 'low quality', 'worst quality', 'low resolution',
+    'text', 'watermark', 'signature', 'logo',
+    'cropped', 'out of frame', 'jpeg artifacts',
+  ].join(', ');
+
+  try {
+    const result = await generateImage(fullPrompt, negativePrompt, '16:9');
+    if (result) return NextResponse.json(result);
+    return NextResponse.json({ error: 'Background generation failed. Try again.' }, { status: 500 });
+  } catch (error) {
+    console.error('Background generation error:', error);
+    return NextResponse.json({ error: 'Failed to generate background' }, { status: 500 });
+  }
+}
+
+// ============================================================
+// Key Art Generation (Stability AI)
+// ============================================================
+
+async function handleKeyArtGeneration(body: RequestBody) {
+  const { prompt } = body as unknown as { prompt: string };
+
+  const fullPrompt = [
+    'masterpiece, best quality, highly detailed anime illustration,',
+    'beautiful 2D anime key visual, promotional illustration,',
+    `${prompt},`,
+    'dramatic composition, dynamic lighting,',
+    'vivid colors, detailed shading, atmospheric,',
+    'anime art style, premium quality illustration,',
+    'professional anime key art, cover illustration quality',
+  ].join(' ');
+
+  const negativePrompt = [
+    'photorealistic', 'photo', '3D render', 'CGI',
+    'deformed', 'ugly', 'blurry', 'low quality', 'bad anatomy',
+    'text', 'watermark', 'signature', 'logo',
+    'cropped', 'out of frame', 'worst quality', 'low resolution',
+    'jpeg artifacts',
+  ].join(', ');
+
+  try {
+    const result = await generateImage(fullPrompt, negativePrompt, '3:4');
+    if (result) return NextResponse.json(result);
+    return NextResponse.json({ error: 'Key art generation failed. Try again.' }, { status: 500 });
+  } catch (error) {
+    console.error('Key art generation error:', error);
+    return NextResponse.json({ error: 'Failed to generate key art' }, { status: 500 });
   }
 }
 

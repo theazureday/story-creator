@@ -85,8 +85,43 @@ export interface Scene {
   outfits: Record<string, string>; // characterId -> outfit description
   winConditions: WinCondition[];
   unlockedBySceneId: string | null;
+  isPremium: boolean;
+  coinCost: number; // 0 if not premium
   createdAt: number;
   updatedAt: number;
+}
+
+// --- Background ---
+export interface Background {
+  id: string;
+  storyId: string;
+  name: string;
+  description: string;
+  imageUrl: string;
+  prompt: string;
+  tags: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+// --- Key Art ---
+export interface KeyArt {
+  id: string;
+  storyId: string;
+  name: string;
+  description: string;
+  imageUrl: string;
+  prompt: string;
+  tags: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+// --- User Wallet ---
+export interface UserWallet {
+  uid: string;
+  coins: number;
+  lastUpdated: number;
 }
 
 // --- AI Dialogue ---
