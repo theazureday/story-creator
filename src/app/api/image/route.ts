@@ -714,10 +714,11 @@ async function handleExpressionGeneration(body: RequestBody) {
       editedDataUri = await grokImageEdit(instructionalPrompt, imageInput, 'b64_json');
     }
 
-    // Remove background
-    const raw = editedDataUri.replace(/^data:image\/\w+;base64,/, '');
-    const cleaned = await removeBackgroundAPI(raw, 'image/png');
-    return NextResponse.json({ imageUrl: cleaned || editedDataUri });
+    // Skip Stability AI background removal for expressions/outfits — it has
+    // built-in content moderation that blurs NSFW images. The base portrait already
+    // has a transparent background, and JANKU prompts include 'white background',
+    // so the output doesn't need external bg removal.
+    return NextResponse.json({ imageUrl: editedDataUri });
   } catch (error) {
     console.error('Expression generation error:', error);
     return NextResponse.json(
