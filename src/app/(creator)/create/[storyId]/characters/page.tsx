@@ -28,9 +28,9 @@ const EXPRESSIONS: ExpressionKey[] = [
   'default',
   'happy',
   'sad',
-  'angry',
+  'annoyed',
   'surprised',
-  'thinking',
+  'aroused',
   'embarrassed',
 ];
 
@@ -62,12 +62,13 @@ function cropFaceFromPortrait(dataUrl: string): Promise<string> {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      const cropHeight = img.height * 0.32;
-      const cropWidth = Math.min(img.width, cropHeight * 1.1);
-      const sx = Math.max(0, (img.width - cropWidth) / 2);
+      // Crop a square region from the top-center of the image focused on the face
+      // Use 25% of the image height to zoom in more on the face
+      const cropSize = Math.min(img.width, img.height * 0.25);
+      const sx = Math.max(0, (img.width - cropSize) / 2);
       const sy = 0;
-      const sw = Math.min(cropWidth, img.width);
-      const sh = Math.min(cropHeight, img.height);
+      const sw = cropSize;
+      const sh = cropSize;
       const outputSize = 256;
       canvas.width = outputSize;
       canvas.height = outputSize;
@@ -102,161 +103,12 @@ function compressImage(dataUrl: string, maxWidth = 768, quality = 0.85): Promise
   });
 }
 
+/**
+ * Background removal is now handled server-side by Stability AI's remove-background API.
+ * This function is a passthrough for backward compatibility.
+ */
 function removeBackground(dataUrl: string): Promise<string> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const w = img.width;
-      const h = img.height;
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) { resolve(dataUrl); return; }
-      ctx.drawImage(img, 0, 0);
-      const imageData = ctx.getImageData(0, 0, w, h);
-      const d = imageData.data;
-
-      const sampleEdge = (positions: number[]) => {
-        const rs: number[] = [], gs: number[] = [], bs: number[] = [];
-        for (const px of positions) {
-          const i = px * 4;
-          rs.push(d[i]); gs.push(d[i+1]); bs.push(d[i+2]);
-        }
-        rs.sort((a,b) => a-b); gs.sort((a,b) => a-b); bs.sort((a,b) => a-b);
-        const m = Math.floor(rs.length / 2);
-        return { r: rs[m], g: gs[m], b: bs[m] };
-      };
-
-      const topPx: number[] = [], botPx: number[] = [], leftPx: number[] = [], rightPx: number[] = [];
-      for (let x = 0; x < w; x += 2) { topPx.push(x); botPx.push((h-1)*w + x); }
-      for (let y = 0; y < h; y += 2) { leftPx.push(y*w); rightPx.push(y*w + w-1); }
-      const edgeSamples = [sampleEdge(topPx), sampleEdge(botPx), sampleEdge(leftPx), sampleEdge(rightPx)];
-
-      const bgIsAchromatic = edgeSamples.every(s => {
-        const sat = Math.max(s.r, s.g, s.b) - Math.min(s.r, s.g, s.b);
-        return sat < 35;
-      });
-      const bgIsGreen = edgeSamples.some(s => s.g > 150 && s.r < 120 && s.b < 120);
-      const avgBgBrightness = edgeSamples.reduce((sum, s) => sum + (s.r + s.g + s.b) / 3, 0) / edgeSamples.length;
-      const threshold = bgIsGreen ? 80 : bgIsAchromatic ? (avgBgBrightness < 50 ? 70 : 110) : 70;
-      const feather = 15;
-
-      function minEdgeDist(idx: number): number {
-        let minD = Infinity;
-        for (const bg of edgeSamples) {
-          const dr = d[idx] - bg.r, dg = d[idx+1] - bg.g, db = d[idx+2] - bg.b;
-          const dd = Math.sqrt(dr*dr + dg*dg + db*db);
-          if (dd < minD) minD = dd;
-        }
-        return minD;
-      }
-
-      function isLowSaturation(idx: number): boolean {
-        const maxCh = Math.max(d[idx], d[idx+1], d[idx+2]);
-        const minCh = Math.min(d[idx], d[idx+1], d[idx+2]);
-        if (maxCh <= 10) return true;
-        const absSat = maxCh - minCh;
-        const relSat = absSat / maxCh;
-        return absSat < 30 && relSat < 0.18;
-      }
-
-      const visited = new Uint8Array(w * h);
-      const rawBg = new Uint8Array(w * h);
-      const queue: number[] = [];
-      for (let x = 0; x < w; x++) { queue.push(x); queue.push((h-1)*w + x); }
-      for (let y = 1; y < h-1; y++) { queue.push(y*w); queue.push(y*w + w-1); }
-
-      while (queue.length > 0) {
-        const px = queue.pop()!;
-        if (visited[px]) continue;
-        visited[px] = 1;
-        const pxIdx = px * 4;
-        const dd = minEdgeDist(pxIdx);
-        let accept = dd < threshold + feather;
-        if (accept && bgIsAchromatic) {
-          accept = isLowSaturation(pxIdx);
-        }
-        if (accept) {
-          rawBg[px] = 1;
-          const x = px % w, y = Math.floor(px / w);
-          if (x > 0 && !visited[px-1]) queue.push(px-1);
-          if (x < w-1 && !visited[px+1]) queue.push(px+1);
-          if (y > 0 && !visited[px-w]) queue.push(px-w);
-          if (y < h-1 && !visited[px+w]) queue.push(px+w);
-        }
-      }
-
-      const borderConnected = new Uint8Array(w * h);
-      const borderQueue: number[] = [];
-      for (let x = 0; x < w; x++) {
-        if (rawBg[x]) borderQueue.push(x);
-        if (rawBg[(h-1)*w + x]) borderQueue.push((h-1)*w + x);
-      }
-      for (let y = 1; y < h-1; y++) {
-        if (rawBg[y*w]) borderQueue.push(y*w);
-        if (rawBg[y*w + w-1]) borderQueue.push(y*w + w-1);
-      }
-      const borderVisited = new Uint8Array(w * h);
-      while (borderQueue.length > 0) {
-        const px = borderQueue.pop()!;
-        if (borderVisited[px]) continue;
-        borderVisited[px] = 1;
-        if (!rawBg[px]) continue;
-        borderConnected[px] = 1;
-        const bx = px % w, by = Math.floor(px / w);
-        if (bx > 0 && !borderVisited[px-1]) borderQueue.push(px-1);
-        if (bx < w-1 && !borderVisited[px+1]) borderQueue.push(px+1);
-        if (by > 0 && !borderVisited[px-w]) borderQueue.push(px-w);
-        if (by < h-1 && !borderVisited[px+w]) borderQueue.push(px+w);
-      }
-
-      const isBackground = new Uint8Array(w * h);
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const px = y * w + x;
-          if (!borderConnected[px]) continue;
-          let bgCount = 0, total = 0;
-          for (let dy = -3; dy <= 3; dy++) {
-            for (let dx = -3; dx <= 3; dx++) {
-              const ny = y + dy, nx = x + dx;
-              if (ny >= 0 && ny < h && nx >= 0 && nx < w) {
-                total++;
-                if (borderConnected[ny * w + nx]) bgCount++;
-              }
-            }
-          }
-          if (bgCount >= total * 0.65) isBackground[px] = 1;
-        }
-      }
-
-      let removedCount = 0;
-      for (let i = 0; i < w * h; i++) {
-        if (isBackground[i]) {
-          removedCount++;
-          const di = i * 4;
-          const dd = minEdgeDist(di);
-          if (dd < threshold) {
-            d[di + 3] = 0;
-          } else {
-            const alpha = Math.round(((dd - threshold) / feather) * 255);
-            d[di + 3] = Math.min(d[di + 3], Math.max(0, Math.min(255, alpha)));
-          }
-        }
-      }
-
-      const pct = removedCount / (w * h);
-      if (pct < 0.05 || pct > 0.92) {
-        resolve(dataUrl);
-        return;
-      }
-
-      ctx.putImageData(imageData, 0, 0);
-      resolve(canvas.toDataURL('image/png'));
-    };
-    img.onerror = () => resolve(dataUrl);
-    img.src = dataUrl;
-  });
+  return Promise.resolve(dataUrl);
 }
 
 function getExpressivenessLabel(value: number): string {
@@ -394,44 +246,94 @@ export default function CharacterBuilder() {
     setIsSaving(true);
     try {
       // Upload any data URL images to Firebase Storage before saving
+      // All uploads run in parallel for speed
       const charToSave = { ...selectedChar };
+      const charBasePath = `stories/${storyId}/characters/${charToSave.id}`;
+
+      // Collect all upload promises
+      const uploads: Array<{ key: string; promise: Promise<string> }> = [];
 
       // Upload base image if it's a data URL
       if (charToSave.baseImageUrl?.startsWith('data:')) {
-        const path = `stories/${storyId}/characters/${charToSave.id}/base.png`;
-        const url = await uploadImage(path, dataUrlToBlob(charToSave.baseImageUrl));
-        charToSave.baseImageUrl = url;
+        uploads.push({
+          key: 'baseImageUrl',
+          promise: uploadImage(`${charBasePath}/base.png`, dataUrlToBlob(charToSave.baseImageUrl)),
+        });
       }
 
       // Upload profile pic if it's a data URL
       if (charToSave.profilePicUrl?.startsWith('data:')) {
-        const path = `stories/${storyId}/characters/${charToSave.id}/profile.png`;
-        const url = await uploadImage(path, dataUrlToBlob(charToSave.profilePicUrl));
-        charToSave.profilePicUrl = url;
+        uploads.push({
+          key: 'profilePicUrl',
+          promise: uploadImage(`${charBasePath}/profile.png`, dataUrlToBlob(charToSave.profilePicUrl)),
+        });
       }
 
       // Upload expression images that are data URLs
       const newExpressions = { ...charToSave.expressions };
       for (const [expr, imgUrl] of Object.entries(newExpressions)) {
         if (imgUrl && imgUrl.startsWith('data:')) {
-          const path = `stories/${storyId}/characters/${charToSave.id}/${expr}.png`;
-          const url = await uploadImage(path, dataUrlToBlob(imgUrl));
-          newExpressions[expr as ExpressionKey] = url;
+          uploads.push({
+            key: `expr_${expr}`,
+            promise: uploadImage(`${charBasePath}/${expr}.png`, dataUrlToBlob(imgUrl)),
+          });
         }
       }
-      charToSave.expressions = newExpressions;
 
-      // Upload outfit variant images that are data URLs
-      if (charToSave.outfitVariants) {
-        const newVariants = [...charToSave.outfitVariants];
-        for (let i = 0; i < newVariants.length; i++) {
-          if (newVariants[i].imageUrl?.startsWith('data:')) {
-            const path = `stories/${storyId}/characters/${charToSave.id}/outfit_${newVariants[i].id}.png`;
-            newVariants[i] = { ...newVariants[i], imageUrl: await uploadImage(path, dataUrlToBlob(newVariants[i].imageUrl)) };
+      // Upload outfit variant images and their expressions
+      const newVariants = charToSave.outfitVariants ? [...charToSave.outfitVariants] : [];
+      for (let i = 0; i < newVariants.length; i++) {
+        const variant = newVariants[i];
+        if (variant.imageUrl?.startsWith('data:')) {
+          uploads.push({
+            key: `outfit_${i}_imageUrl`,
+            promise: uploadImage(`${charBasePath}/outfit_${variant.id}.png`, dataUrlToBlob(variant.imageUrl)),
+          });
+        }
+        // Also upload outfit expression images
+        if (variant.expressions) {
+          for (const [expr, imgUrl] of Object.entries(variant.expressions)) {
+            if (imgUrl && imgUrl.startsWith('data:')) {
+              uploads.push({
+                key: `outfit_${i}_expr_${expr}`,
+                promise: uploadImage(`${charBasePath}/outfit_${variant.id}_${expr}.png`, dataUrlToBlob(imgUrl)),
+              });
+            }
           }
         }
-        charToSave.outfitVariants = newVariants;
       }
+
+      // Execute all uploads in parallel
+      const results = await Promise.all(
+        uploads.map(async (u) => ({ key: u.key, url: await u.promise }))
+      );
+
+      // Apply results back to charToSave
+      for (const { key, url } of results) {
+        if (key === 'baseImageUrl') {
+          charToSave.baseImageUrl = url;
+        } else if (key === 'profilePicUrl') {
+          charToSave.profilePicUrl = url;
+        } else if (key.startsWith('expr_')) {
+          const expr = key.replace('expr_', '') as ExpressionKey;
+          newExpressions[expr] = url;
+        } else if (key.startsWith('outfit_')) {
+          const parts = key.split('_'); // outfit_{i}_{field} or outfit_{i}_expr_{expr}
+          const idx = parseInt(parts[1]);
+          if (parts[2] === 'imageUrl') {
+            newVariants[idx] = { ...newVariants[idx], imageUrl: url };
+          } else if (parts[2] === 'expr') {
+            const expr = parts[3] as ExpressionKey;
+            newVariants[idx] = {
+              ...newVariants[idx],
+              expressions: { ...newVariants[idx].expressions, [expr]: url },
+            };
+          }
+        }
+      }
+
+      charToSave.expressions = newExpressions;
+      charToSave.outfitVariants = newVariants;
 
       await updateCharacterFB(storyId, charToSave.id, charToSave);
       setCharacters(
@@ -494,7 +396,7 @@ export default function CharacterBuilder() {
     setGeneratingChar(true);
     setAiPreview(null);
     try {
-      const res = await fetch('/api/gemini', {
+      const res = await fetch('/api/image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -568,7 +470,7 @@ export default function CharacterBuilder() {
     if (!selectedChar || !editorAiPrompt.trim()) return;
     setGeneratingBaseImage(true);
     try {
-      const res = await fetch('/api/gemini', {
+      const res = await fetch('/api/image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -621,9 +523,9 @@ export default function CharacterBuilder() {
         : selectedChar.baseImageUrl;
 
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 55000);
+      const timeout = setTimeout(() => controller.abort(), 100000);
 
-      const res = await fetch('/api/gemini', {
+      const res = await fetch('/api/image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -631,6 +533,7 @@ export default function CharacterBuilder() {
           baseImageUrl: compressedBase,
           expression,
           characterName: selectedChar.displayName,
+          characterDescription: selectedChar.description || '',
           expressiveness: selectedChar.expressiveness ?? 50,
         }),
         signal: controller.signal,
@@ -708,9 +611,9 @@ export default function CharacterBuilder() {
             await new Promise((resolve) => setTimeout(resolve, 1500));
           }
           const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 55000);
+          const timeout = setTimeout(() => controller.abort(), 100000);
 
-          const res = await fetch('/api/gemini', {
+          const res = await fetch('/api/image', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -718,6 +621,7 @@ export default function CharacterBuilder() {
               baseImageUrl: compressedBase,
               expression: expr,
               characterName: selectedChar.displayName,
+              characterDescription: selectedChar.description || '',
               expressiveness: selectedChar.expressiveness ?? 50,
             }),
             signal: controller.signal,
@@ -758,7 +662,8 @@ export default function CharacterBuilder() {
         ? await compressImage(selectedChar.baseImageUrl)
         : selectedChar.baseImageUrl;
 
-      const res = await fetch('/api/gemini', {
+      // Step 1: Generate the base outfit image (default expression)
+      const res = await fetch('/api/image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -766,26 +671,71 @@ export default function CharacterBuilder() {
           baseImageUrl: compressedBase,
           expression: `wearing ${outfitPrompt}`,
           characterName: selectedChar.displayName,
-          expressiveness: 50,
+          characterDescription: selectedChar.description || '',
+          expressiveness: 60,
         }),
       });
       if (!res.ok) { alert('Outfit generation failed. Try again.'); return; }
       const data = await res.json();
-      if (data.imageUrl) {
-        const cleanedUrl = await removeBackground(data.imageUrl);
-        const newVariant: OutfitVariant = {
-          id: generateId(),
-          name: outfitName,
-          description: outfitPrompt,
-          imageUrl: cleanedUrl,
-          prompt: outfitPrompt,
-        };
-        const variants = [...(selectedChar.outfitVariants || []), newVariant];
-        updateSelected({ outfitVariants: variants });
-        setOutfitName('');
-        setOutfitPrompt('');
-      } else {
+      if (!data.imageUrl) {
         alert(data.message || data.error || 'Outfit generation failed.');
+        return;
+      }
+
+      const cleanedUrl = await removeBackground(data.imageUrl);
+      const variantId = generateId();
+      const newVariant: OutfitVariant = {
+        id: variantId,
+        name: outfitName,
+        description: outfitPrompt,
+        imageUrl: cleanedUrl,
+        prompt: outfitPrompt,
+        expressions: { default: cleanedUrl },
+      };
+
+      // Add outfit immediately so user sees progress
+      const localVariants = [...(selectedChar.outfitVariants || []), newVariant];
+      updateSelected({ outfitVariants: localVariants });
+      setOutfitName('');
+      setOutfitPrompt('');
+
+      // Step 2: Auto-generate expressions for this outfit in the background
+      const expressionsToGenerate: ExpressionKey[] = ['happy', 'sad', 'annoyed', 'surprised', 'aroused', 'embarrassed'];
+      const outfitImageForEditing = cleanedUrl; // Use the outfit image as base for expressions
+      const outfitExprs: Partial<Record<ExpressionKey, string>> = { default: cleanedUrl };
+
+      for (const expr of expressionsToGenerate) {
+        try {
+          const exprRes = await fetch('/api/image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'generate_expression',
+              baseImageUrl: outfitImageForEditing,
+              expression: expr,
+              characterName: selectedChar.displayName,
+              characterDescription: selectedChar.description || '',
+              expressiveness: selectedChar.expressiveness ?? 50,
+            }),
+          });
+          if (exprRes.ok) {
+            const exprData = await exprRes.json();
+            if (exprData.imageUrl) {
+              const cleanedExpr = await removeBackground(exprData.imageUrl);
+              outfitExprs[expr] = cleanedExpr;
+              // Update variant in our local array and push to state
+              const updatedVariant: OutfitVariant = {
+                ...newVariant,
+                expressions: { ...outfitExprs },
+              };
+              const idx = localVariants.findIndex((v) => v.id === variantId);
+              if (idx >= 0) localVariants[idx] = updatedVariant;
+              updateSelected({ outfitVariants: [...localVariants] });
+            }
+          }
+        } catch (exprErr) {
+          console.error(`Failed to generate ${expr} for outfit:`, exprErr);
+        }
       }
     } catch (err) {
       console.error('Outfit generation error:', err);
@@ -893,7 +843,7 @@ export default function CharacterBuilder() {
                 {generatingChar ? (
                   <span className="flex items-center gap-2">
                     <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Generating with Gemini...
+                    Generating with AI...
                   </span>
                 ) : (
                   '✨ Generate Character Portrait'
@@ -1358,34 +1308,46 @@ export default function CharacterBuilder() {
                 <h2 className="text-xl font-bold text-white">Outfit Variants</h2>
                 <p className="text-gray-400 text-xs">Create different outfit versions of this character. These can be assigned per-scene.</p>
 
-                {/* Existing variants */}
-                {(selectedChar.outfitVariants || []).length > 0 && (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {(selectedChar.outfitVariants || []).map((variant) => (
-                      <div key={variant.id} className="text-center relative group">
-                        <div
-                          className="aspect-[3/4] bg-gray-800 rounded-lg overflow-hidden mb-2 cursor-pointer hover:ring-2 hover:ring-white/30"
-                          onClick={() => { setLightboxImage(variant.imageUrl); setLightboxLabel(variant.name); }}
-                        >
-                          {variant.imageUrl ? (
-                            <img src={variant.imageUrl} alt={variant.name} className="w-full h-full object-contain" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-gray-600">?</div>
-                          )}
-                        </div>
-                        <p className="text-gray-300 text-xs font-medium">{variant.name}</p>
-                        <p className="text-gray-500 text-[10px] line-clamp-1">{variant.description}</p>
-                        <button
-                          onClick={() => deleteOutfitVariant(variant.id)}
-                          className="absolute top-1 right-1 w-5 h-5 bg-red-600/80 hover:bg-red-500 text-white rounded-full text-[10px] opacity-0 group-hover:opacity-100 transition flex items-center justify-center"
-                          title="Remove variant"
-                        >
-                          ✕
-                        </button>
+                {/* Existing variants with expression grids */}
+                {(selectedChar.outfitVariants || []).map((variant) => (
+                  <div key={variant.id} className="bg-gray-800/50 rounded-lg p-4 space-y-3 relative group">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-gray-200 text-sm font-semibold">{variant.name}</p>
+                        <p className="text-gray-500 text-[10px]">{variant.description}</p>
                       </div>
-                    ))}
+                      <button
+                        onClick={() => deleteOutfitVariant(variant.id)}
+                        className="w-6 h-6 bg-red-600/80 hover:bg-red-500 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition flex items-center justify-center"
+                        title="Remove outfit"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-4 md:grid-cols-7 gap-2">
+                      {EXPRESSIONS.map((expr) => {
+                        const exprUrl = variant.expressions?.[expr] || (expr === 'default' ? variant.imageUrl : null);
+                        return (
+                          <div key={expr} className="text-center">
+                            <div
+                              className="aspect-[3/4] bg-gray-900 rounded overflow-hidden cursor-pointer hover:ring-2 hover:ring-purple-400/50"
+                              onClick={() => { if (exprUrl) { setLightboxImage(exprUrl); setLightboxLabel(`${variant.name} — ${expr}`); } }}
+                            >
+                              {exprUrl ? (
+                                <img src={exprUrl} alt={`${variant.name} ${expr}`} className="w-full h-full object-contain" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-gray-700 text-xs">
+                                  {generatingOutfit ? '⏳' : '—'}
+                                </div>
+                              )}
+                            </div>
+                            <p className="text-gray-500 text-[9px] mt-1 capitalize">{expr}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                )}
+                ))}
 
                 {/* Generate new variant */}
                 <div className="bg-purple-900/20 border border-purple-500/20 rounded-lg p-4 space-y-3">
