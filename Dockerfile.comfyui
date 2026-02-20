@@ -1,0 +1,7 @@
+FROM runpod/worker-comfyui:5.7.1-base
+
+# Download JANKU v6.9 (Illustrious/SDXL-based anime checkpoint) from HuggingFace
+RUN comfy model download \
+  --url https://huggingface.co/Kutches/Top-ModelsV2/resolve/main/JANKUTrainedNoobaiRouwei_v69.safetensors \
+  --relative-path models/checkpoints \
+  --filename JANKUTrainedNoobaiRouwei_v69.safetensors
