@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const maxDuration = 120;
 
-const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN || '';
-
-// (Stability AI removed — used RunPod rembg instead, no content moderation)
+// All image generation now runs through RunPod JANKU — no content moderation or IP filtering
 
 // xAI Grok Imagine for expression/outfit editing
 const XAI_API_KEY = process.env.XAI_API_KEY || '';
@@ -20,72 +18,8 @@ const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY || '';
 const RUNPOD_ENDPOINT_ID = process.env.RUNPOD_ENDPOINT_ID || '';
 
 // ============================================================
-// Replicate API Helpers
+// Utility Helpers
 // ============================================================
-
-/**
- * Run a Replicate model using versioned format (owner/name:version).
- */
-async function replicateRunVersion(
-  version: string,
-  input: Record<string, unknown>,
-  timeoutMs: number = 90000,
-): Promise<unknown> {
-  // Retry up to 2 times on rate limit (429)
-  let createRes: Response | null = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    createRes = await fetch('https://api.replicate.com/v1/predictions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${REPLICATE_API_TOKEN}`,
-      },
-      body: JSON.stringify({
-        version,
-        input,
-      }),
-    });
-
-    if (createRes.status === 429 && attempt < 2) {
-      // Rate limited — wait and retry
-      await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
-      continue;
-    }
-    break;
-  }
-
-  if (!createRes || !createRes.ok) {
-    const errText = await createRes?.text().catch(() => '') || '';
-    throw new Error(`Replicate create failed (${createRes?.status}): ${errText}`);
-  }
-
-  const prediction = await createRes.json();
-
-  if (prediction.status === 'succeeded') return prediction.output;
-  if (prediction.status === 'failed') throw new Error(prediction.error || 'Replicate prediction failed');
-
-  const pollUrl = prediction.urls?.get || `https://api.replicate.com/v1/predictions/${prediction.id}`;
-  const startTime = Date.now();
-  const pollInterval = 2000;
-
-  while (Date.now() - startTime < timeoutMs) {
-    await new Promise((r) => setTimeout(r, pollInterval));
-
-    const statusRes = await fetch(pollUrl, {
-      headers: { Authorization: `Bearer ${REPLICATE_API_TOKEN}` },
-    });
-
-    if (!statusRes.ok) continue;
-
-    const statusData = await statusRes.json();
-
-    if (statusData.status === 'succeeded') return statusData.output;
-    if (statusData.status === 'failed') throw new Error(statusData.error || 'Replicate prediction failed');
-    if (statusData.status === 'canceled') throw new Error('Replicate prediction canceled');
-  }
-
-  throw new Error('Polling timeout — Replicate prediction did not complete in time');
-}
 
 /**
  * Download an image URL and convert to data URI.
@@ -390,10 +324,127 @@ async function falWan25ImageEdit(
 }
 
 // ============================================================
-// RunPod ComfyUI img2img (JANKU v6.9 Illustrious/SDXL — no content filter)
+// RunPod ComfyUI txt2img (JANKU v6.9 — no content filter)
 // ============================================================
 
 const SDXL_NEGATIVE = 'lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name, deformed, ugly, duplicate, morbid, mutilated, extra limbs, cloned face, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck';
+
+function buildJankuTxt2ImgWorkflow(prompt: string, negativePrompt: string, seed: number, width: number = 832, height: number = 1216, cfg: number = 5.0, steps: number = 28): Record<string, unknown> {
+  return {
+    "1": {
+      "inputs": { "ckpt_name": "JANKUTrainedNoobaiRouwei_v69.safetensors" },
+      "class_type": "CheckpointLoaderSimple"
+    },
+    "2": {
+      "inputs": { "text": prompt, "clip": ["1", 1] },
+      "class_type": "CLIPTextEncode"
+    },
+    "3": {
+      "inputs": { "text": negativePrompt, "clip": ["1", 1] },
+      "class_type": "CLIPTextEncode"
+    },
+    "4": {
+      "inputs": { "width": width, "height": height, "batch_size": 1 },
+      "class_type": "EmptyLatentImage"
+    },
+    "5": {
+      "inputs": {
+        "seed": seed,
+        "steps": steps,
+        "cfg": cfg,
+        "sampler_name": "euler_ancestral",
+        "scheduler": "normal",
+        "denoise": 1.0,
+        "model": ["1", 0],
+        "positive": ["2", 0],
+        "negative": ["3", 0],
+        "latent_image": ["4", 0]
+      },
+      "class_type": "KSampler"
+    },
+    "6": {
+      "inputs": { "samples": ["5", 0], "vae": ["1", 2] },
+      "class_type": "VAEDecode"
+    },
+    "7": {
+      "inputs": { "filename_prefix": "output", "images": ["6", 0] },
+      "class_type": "SaveImage"
+    }
+  };
+}
+
+async function runpodComfyUITxt2Img(
+  prompt: string,
+  timeoutMs: number = 120000,
+  width: number = 832,
+  height: number = 1216,
+  cfg: number = 5.0,
+  steps: number = 28,
+  negativePrompt: string = SDXL_NEGATIVE,
+): Promise<string> {
+  const RUNPOD_BASE = `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}`;
+  const seed = Math.floor(Math.random() * 2147483647);
+  const workflow = buildJankuTxt2ImgWorkflow(prompt, negativePrompt, seed, width, height, cfg, steps);
+
+  const submitRes = await fetch(`${RUNPOD_BASE}/run`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${RUNPOD_API_KEY}`,
+    },
+    body: JSON.stringify({ input: { workflow } }),
+  });
+
+  if (!submitRes.ok) {
+    const errText = await submitRes.text().catch(() => '');
+    throw new Error(`RunPod txt2img submit failed (${submitRes.status}): ${errText}`);
+  }
+
+  const submitData = await submitRes.json();
+  const jobId = submitData.id;
+  if (!jobId) throw new Error('No job ID in RunPod txt2img response');
+
+  const startTime = Date.now();
+  const pollInterval = 3000;
+
+  while (Date.now() - startTime < timeoutMs) {
+    await new Promise((r) => setTimeout(r, pollInterval));
+
+    const pollRes = await fetch(`${RUNPOD_BASE}/status/${jobId}`, {
+      headers: { Authorization: `Bearer ${RUNPOD_API_KEY}` },
+    });
+
+    if (!pollRes.ok) continue;
+    const pollData = await pollRes.json();
+    const status = pollData.status;
+
+    if (status === 'COMPLETED') {
+      const images = pollData.output?.images;
+      if (images && images.length > 0) {
+        const img = images[0];
+        if (img.type === 'base64') return `data:image/png;base64,${img.data}`;
+        if (img.url) {
+          const dlRes = await fetch(img.url);
+          if (dlRes.ok) {
+            const buf = Buffer.from(await dlRes.arrayBuffer());
+            return `data:image/png;base64,${buf.toString('base64')}`;
+          }
+        }
+      }
+      throw new Error('RunPod txt2img completed but no image returned');
+    }
+
+    if (status === 'FAILED') {
+      throw new Error(`RunPod txt2img failed: ${pollData.error || 'unknown error'}`);
+    }
+  }
+
+  throw new Error('RunPod txt2img timed out');
+}
+
+// ============================================================
+// RunPod ComfyUI img2img (JANKU v6.9 — no content filter)
+// ============================================================
 
 function buildJankuImg2ImgWorkflow(prompt: string, negativePrompt: string, seed: number, denoise: number = 0.55, cfg: number = 6.0): Record<string, unknown> {
   return {
@@ -536,9 +587,6 @@ async function runpodComfyUIImageEdit(
 // Anime Prompt Builders (Danbooru tag style)
 // ============================================================
 
-const ANIME_NEGATIVE =
-  'lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name, multiple views, multiple angles';
-
 function buildCharacterTags(characterName: string, description: string): string {
   return [
     'masterpiece, best quality, absurdres, highres',
@@ -629,16 +677,6 @@ function buildKeyArtTags(prompt: string): string {
 }
 
 // ============================================================
-// Replicate Model IDs
-// ============================================================
-
-// Animagine XL 4.0 — fast, cheap ($0.007/run), excellent anime quality
-const ANIMAGINE_VERSION = '057e2276ac5dcd8d1575dc37b131f903df9c10c41aed53d47cd7d4f068c19fa5';
-
-// SD 3.5 Large — kept for potential future use
-// const SD35_VERSION = '2fdf9488b53c1e0fd3aef7b477def1c00d1856a38466733711f9c769942598f5';
-
-// ============================================================
 // Route Handler
 // ============================================================
 
@@ -648,9 +686,9 @@ interface RequestBody {
 }
 
 export async function POST(req: NextRequest) {
-  if (!REPLICATE_API_TOKEN) {
+  if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT_ID) {
     return NextResponse.json(
-      { error: 'Replicate API not configured' },
+      { error: 'RunPod API not configured' },
       { status: 500 },
     );
   }
@@ -678,7 +716,7 @@ export async function POST(req: NextRequest) {
 }
 
 // ============================================================
-// Character Generation (Animagine XL 4.0 txt2img → remove bg)
+// Character Generation (JANKU txt2img → rembg — fully uncensored)
 // ============================================================
 
 async function handleCharacterGeneration(body: RequestBody) {
@@ -691,25 +729,8 @@ async function handleCharacterGeneration(body: RequestBody) {
   const tags = buildCharacterTags(characterName, prompt);
 
   try {
-    // Use Animagine XL 4.0 for character generation
-    const output = await replicateRunVersion(ANIMAGINE_VERSION, {
-      prompt: tags,
-      negative_prompt: ANIME_NEGATIVE,
-      width: 832,
-      height: 1216,
-      cfg_scale: 5,
-      steps: 28,
-      scheduler: 'Euler a',
-    });
-
-    // Output is an array of image URLs
-    const outputUrls = output as string[];
-    if (!outputUrls || outputUrls.length === 0) {
-      return NextResponse.json({ error: 'Image generation failed' }, { status: 500 });
-    }
-
-    // Download the image and convert to data URI
-    const imageDataUri = await urlToDataUri(outputUrls[0]);
+    // Use JANKU on RunPod for txt2img — no content moderation, no IP filtering
+    const imageDataUri = await runpodComfyUITxt2Img(tags, 120000, 832, 1216, 5.0, 28);
 
     // Remove background using RunPod rembg (no content moderation)
     const cleaned = await removeBackgroundRunPod(imageDataUri);
@@ -800,22 +821,8 @@ async function handleBackgroundGeneration(body: RequestBody) {
   ].join(', ');
 
   try {
-    const output = await replicateRunVersion(ANIMAGINE_VERSION, {
-      prompt: tags,
-      negative_prompt: negPrompt,
-      width: 1216,
-      height: 832,
-      cfg_scale: 5,
-      steps: 28,
-      scheduler: 'Euler a',
-    });
-
-    const outputUrls = output as string[];
-    if (!outputUrls || outputUrls.length === 0) {
-      return NextResponse.json({ error: 'Background generation failed' }, { status: 500 });
-    }
-
-    const imageDataUri = await urlToDataUri(outputUrls[0]);
+    // Use JANKU on RunPod — no content moderation
+    const imageDataUri = await runpodComfyUITxt2Img(tags, 120000, 1216, 832, 5.0, 28, negPrompt);
     return NextResponse.json({ imageUrl: imageDataUri });
   } catch (error) {
     console.error('Background generation error:', error);
@@ -827,7 +834,7 @@ async function handleBackgroundGeneration(body: RequestBody) {
 }
 
 // ============================================================
-// Key Art Generation (Animagine XL 4.0 txt2img, portrait)
+// Key Art Generation (JANKU txt2img, portrait — no content filter)
 // ============================================================
 
 async function handleKeyArtGeneration(body: RequestBody) {
@@ -838,22 +845,8 @@ async function handleKeyArtGeneration(body: RequestBody) {
     'lowres, worst quality, low quality, jpeg artifacts, text, watermark, signature, logo, bad anatomy, deformed';
 
   try {
-    const output = await replicateRunVersion(ANIMAGINE_VERSION, {
-      prompt: tags,
-      negative_prompt: negPrompt,
-      width: 832,
-      height: 1216,
-      cfg_scale: 5,
-      steps: 28,
-      scheduler: 'Euler a',
-    });
-
-    const outputUrls = output as string[];
-    if (!outputUrls || outputUrls.length === 0) {
-      return NextResponse.json({ error: 'Key art generation failed' }, { status: 500 });
-    }
-
-    const imageDataUri = await urlToDataUri(outputUrls[0]);
+    // Use JANKU on RunPod — no content moderation
+    const imageDataUri = await runpodComfyUITxt2Img(tags, 120000, 832, 1216, 5.0, 28, negPrompt);
     return NextResponse.json({ imageUrl: imageDataUri });
   } catch (error) {
     console.error('Key art generation error:', error);
