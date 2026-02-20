@@ -4,8 +4,7 @@ export const maxDuration = 120;
 
 const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN || '';
 
-// Stability AI for background removal
-const STABILITY_API_KEY = process.env.STABILITY_API_KEY || '';
+// (Stability AI removed — used RunPod rembg instead, no content moderation)
 
 // xAI Grok Imagine for expression/outfit editing
 const XAI_API_KEY = process.env.XAI_API_KEY || '';
@@ -100,40 +99,99 @@ async function urlToDataUri(url: string): Promise<string> {
 }
 
 // ============================================================
-// Stability AI Background Removal
+// RunPod ComfyUI Background Removal (rembg — no content moderation)
 // ============================================================
 
-async function removeBackgroundAPI(
-  imageBase64: string,
-  imageMimeType: string = 'image/png',
+function buildRembgWorkflow(): Record<string, unknown> {
+  return {
+    "1": {
+      "inputs": { "image": "input.png" },
+      "class_type": "LoadImage"
+    },
+    "2": {
+      "inputs": { "image": ["1", 0] },
+      "class_type": "Image Remove Background (rembg)"
+    },
+    "3": {
+      "inputs": { "filename_prefix": "output", "images": ["2", 0] },
+      "class_type": "SaveImage"
+    }
+  };
+}
+
+async function removeBackgroundRunPod(
+  imageDataUri: string,
+  timeoutMs: number = 60000,
 ): Promise<string | null> {
+  if (!RUNPOD_API_KEY || !RUNPOD_ENDPOINT_ID) return null;
+
+  const RUNPOD_BASE = `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}`;
+  const base64Data = imageDataUri.replace(/^data:image\/\w+;base64,/, '');
+  const workflow = buildRembgWorkflow();
+
   try {
-    const imageBytes = Buffer.from(imageBase64, 'base64');
-    const imageBlob = new Blob([imageBytes], { type: imageMimeType });
-
-    const form = new FormData();
-    form.append('image', imageBlob, 'input.png');
-    form.append('output_format', 'png');
-
-    const res = await fetch('https://api.stability.ai/v2beta/stable-image/edit/remove-background', {
+    const submitRes = await fetch(`${RUNPOD_BASE}/run`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${STABILITY_API_KEY}`,
-        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${RUNPOD_API_KEY}`,
       },
-      body: form,
+      body: JSON.stringify({
+        input: {
+          workflow,
+          images: [{ name: 'input.png', image: base64Data }],
+        },
+      }),
     });
 
-    if (!res.ok) {
-      console.error(`Background removal failed (${res.status})`);
+    if (!submitRes.ok) {
+      console.error(`RunPod rembg submit failed (${submitRes.status})`);
       return null;
     }
 
-    const data = await res.json();
-    if (data.image) return `data:image/png;base64,${data.image}`;
+    const submitData = await submitRes.json();
+    const jobId = submitData.id;
+    if (!jobId) return null;
+
+    const startTime = Date.now();
+    const pollInterval = 2000;
+
+    while (Date.now() - startTime < timeoutMs) {
+      await new Promise((r) => setTimeout(r, pollInterval));
+
+      const pollRes = await fetch(`${RUNPOD_BASE}/status/${jobId}`, {
+        headers: { Authorization: `Bearer ${RUNPOD_API_KEY}` },
+      });
+
+      if (!pollRes.ok) continue;
+      const pollData = await pollRes.json();
+
+      if (pollData.status === 'COMPLETED') {
+        const images = pollData.output?.images;
+        if (images && images.length > 0) {
+          const img = images[0];
+          if (img.type === 'base64') return `data:image/png;base64,${img.data}`;
+          if (img.url) {
+            const dlRes = await fetch(img.url);
+            if (dlRes.ok) {
+              const buf = Buffer.from(await dlRes.arrayBuffer());
+              return `data:image/png;base64,${buf.toString('base64')}`;
+            }
+          }
+        }
+        return null;
+      }
+
+      if (pollData.status === 'FAILED') {
+        console.error('RunPod rembg failed:', pollData.error);
+        return null;
+      }
+    }
+
+    console.error('RunPod rembg timed out');
     return null;
   } catch (err) {
-    console.error('Background removal error:', err);
+    console.error('RunPod rembg error:', err);
     return null;
   }
 }
@@ -653,9 +711,8 @@ async function handleCharacterGeneration(body: RequestBody) {
     // Download the image and convert to data URI
     const imageDataUri = await urlToDataUri(outputUrls[0]);
 
-    // Remove background
-    const raw = imageDataUri.replace(/^data:image\/\w+;base64,/, '');
-    const cleaned = await removeBackgroundAPI(raw, 'image/png');
+    // Remove background using RunPod rembg (no content moderation)
+    const cleaned = await removeBackgroundRunPod(imageDataUri);
     return NextResponse.json({ imageUrl: cleaned || imageDataUri });
   } catch (error) {
     console.error('Character generation error:', error);

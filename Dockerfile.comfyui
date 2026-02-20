@@ -5,3 +5,6 @@ RUN comfy model download \
   --url https://huggingface.co/Kutches/Top-ModelsV2/resolve/main/JANKUTrainedNoobaiRouwei_v69.safetensors \
   --relative-path models/checkpoints \
   --filename JANKUTrainedNoobaiRouwei_v69.safetensors
+
+# Install rembg custom node for background removal (no content moderation)
+RUN comfy node install comfyui-rembg-node
