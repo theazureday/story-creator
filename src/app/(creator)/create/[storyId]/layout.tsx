@@ -90,13 +90,13 @@ export default function StoryEditorLayout({
     <div className="min-h-screen flex flex-col" style={{ background: 'var(--background)' }}>
       {/* Top Bar */}
       <div className="border-b px-4 py-3 flex items-center gap-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-        <Link
-          href="/create"
+        <button
+          onClick={() => router.push('/create')}
           className="text-gray-400 hover:text-white transition-colors text-sm flex items-center gap-1"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
           Back
-        </Link>
+        </button>
         <div className="h-5 w-px bg-gray-700" />
         {editingTitle ? (
           <input
